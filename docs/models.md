@@ -19,7 +19,7 @@ This object is persisted in the database, and contains a constantly updated reco
             "round": "number"
         }
     ],
-    "status": "waiting | in-progress | complete:
+    "status": "waiting | in-progress | complete"
 }
 ```
 
