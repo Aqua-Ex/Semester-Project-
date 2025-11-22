@@ -1,0 +1,14 @@
+### Create a new game
+POST http://localhost:3001/api/game/create
+Content-Type: application/json
+
+{}
+### Submit a turn
+POST http://localhost:3001/api/game/testId/turn
+Content-Type: application/json
+
+{
+    "text": "The hero entered the forest, unaware of the danger ahead."
+}
+### Get game state
+GET http://localhost:3001/api/game/testId
