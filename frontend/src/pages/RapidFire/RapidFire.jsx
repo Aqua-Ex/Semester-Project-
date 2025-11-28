@@ -13,6 +13,7 @@ import { useThemeClasses } from '../../hooks/useThemeClasses'
 
 const RapidFire = () => {
   const navigate = useNavigate()
+  const themeClasses = useThemeClasses()
   const [story, setStory] = useState('')
   const [round, setRound] = useState(1)
   const [currentPrompt, setCurrentPrompt] = useState({
