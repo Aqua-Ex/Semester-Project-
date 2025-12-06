@@ -5,7 +5,7 @@ const truncate = (text, limit) => {
     return `${text.slice(0, limit - 3)}...`;
 };
 
-export const generateuidePrompt = async (lastLine, turnNumber = 1) => {
+export const generateGuidePrompt = async (lastLine, turnNumber = 1) => {
     const safeLine = truncate(lastLine || 'the story continues', 120);
 
     return [
