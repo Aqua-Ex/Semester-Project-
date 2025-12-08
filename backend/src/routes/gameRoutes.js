@@ -1,9 +1,10 @@
 import express from 'express';
-import {createGame, submitTurn, getGameState} from '../controllers/gameController.js';
+import {createGame, submitTurn, getGameState, joinGame} from '../controllers/gameController.js';
 
 const router = express.Router();
 
 router.post('/create', createGame);
+router.post('/:gameId/join', joinGame);
 router.post('/:gameId/turn', submitTurn);
 router.get('/:gameId', getGameState);
 

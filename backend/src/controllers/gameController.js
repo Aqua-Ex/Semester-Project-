@@ -1,31 +1,54 @@
-export const createGame = async (req, res) => {
-    const gameId = Math.random().toString(36).substring(2, 9);
+import {
+    createGame as createGameService,
+    submitTurn as submitTurnService,
+    getGameState as getGameStateService,
+    joinGame as joinGameService
+} from '../services/gameService.js';
+import {log} from '../tools/logger.js';
 
-    res.json({
-        gameId,
-        initialPrompt: "A traveler enters a mysterious forest..."
-    });
+export const createGame = async (req, res) => {
+    const {hostName, hostId, initialPrompt, turnDurationSeconds, maxTurns, maxPlayers, mode} = req.body || {};
+    const game = await createGameService({hostName, hostId, initialPrompt, turnDurationSeconds, maxTurns, maxPlayers, mode});
+
+    log('Created game', game.id);
+    res.status(201).json({game});
 };
 
 export const submitTurn = async (req, res) => {
     const {gameId} = req.params;
-    const {text} = req.body;
-    console.log(`New player submission in game '${gameId}':`, text);
+    const {playerName, playerId, text} = req.body || {};
 
-    //TODO save to DB, extract last line(s) of prompt, call AI to generate new guiding prompt using last line(s)
+    const result = await submitTurnService(gameId, {playerName, playerId, text});
 
-    res.json({
-        message: "Turn submitted",
-        guidePrompt: "Continue the journey of a traveler entering a dangerous forest..."
-    });
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Turn ${result.turn.order} submitted to game ${gameId} by ${result.turn.playerName}`);
+    res.json({game: result.game, turn: result.turn, scores: result.scores});
 };
 
 export const getGameState = async (req, res) => {
     const {gameId} = req.params;
-    res.json({
-        gameId,
-        players: [],
-        turns: [],
-        status: "waiting"
-    });
+    const result = await getGameStateService(gameId);
+
+    if (result.error) {
+        return res.status(result.status || 404).json({error: result.error});
+    }
+
+    res.json({game: result.game, info: result.info});
+};
+
+export const joinGame = async (req, res) => {
+    const {gameId} = req.params;
+    const {playerName, playerId} = req.body || {};
+
+    const result = await joinGameService(gameId, {playerName, playerId});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Player ${playerName} joined game ${gameId}`);
+    res.json({game: result.game});
 };

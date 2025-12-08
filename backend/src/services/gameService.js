@@ -1,0 +1,428 @@
+import { randomUUID } from 'crypto';
+import { db } from '../firebase.js';
+import { generateGuidePrompt } from './aiService.js';
+import { scoreGame } from './scoringService.js';
+
+const gamesCollection = db.collection('games');
+const usersCollection = db.collection('users');
+const leaderboardCollection = db.collection('leaderboard');
+
+const MODES = {
+  SINGLE: 'single',
+  MULTI: 'multi',
+};
+
+const clamp = (value, min, max, fallback) => {
+  const num = Number(value);
+  if (Number.isFinite(num)) {
+    return Math.min(max, Math.max(min, num));
+  }
+  return fallback;
+};
+
+const nowIso = () => new Date().toISOString();
+
+const advanceTurnState = (game) => {
+  if (!game.players || game.players.length === 0) {
+    return {
+      ...game,
+      currentPlayerIndex: 0,
+      currentPlayer: null,
+      currentPlayerId: null,
+      turnDeadline: null,
+    };
+  }
+  const nextIndex = (game.currentPlayerIndex + 1) % game.players.length;
+  const nextPlayer = game.players[nextIndex];
+  return {
+    ...game,
+    currentPlayerIndex: nextIndex,
+    currentPlayer: nextPlayer.name,
+    currentPlayerId: nextPlayer.id,
+    turnDeadline: new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+  };
+};
+
+const saveFinishedGameForUser = async (userId, summary) => {
+  if (!userId) return;
+  const savedGamesRef = usersCollection.doc(userId).collection('savedGames');
+  const existing = await savedGamesRef.orderBy('createdAt', 'asc').get();
+
+  if (existing.size >= 5) {
+    const oldest = existing.docs[0];
+    await savedGamesRef.doc(oldest.id).delete();
+  }
+
+  await savedGamesRef.doc(summary.gameId).set(summary);
+};
+
+const updateLeaderboard = async (playerScores, players, summary) => {
+  if (!playerScores?.players) return;
+  const nameToId = new Map(players.map((p) => [p.name, p.id]));
+  const entries = Object.entries(playerScores.players || {});
+
+  for (const [name, scoreObj] of entries) {
+    const userId = nameToId.get(name);
+    if (!userId) continue;
+
+    const creativity = Number(scoreObj.creativity) || 0;
+    const cohesion = Number(scoreObj.cohesion) || 0;
+    const momentum = Number(scoreObj.momentum) || 0;
+    const total = (creativity + cohesion + momentum) / 3;
+
+    const ref = leaderboardCollection.doc(userId);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const existing = snap.exists ? snap.data() : {};
+      const topScore = existing.topScore || 0;
+      const isTop = total > topScore;
+      const updated = {
+        userId,
+        username: name,
+        lastScore: total,
+        topScore: Math.max(topScore, total),
+        gamesPlayed: (existing.gamesPlayed || 0) + 1,
+        lastUpdated: nowIso(),
+      };
+      if (isTop && summary) {
+        updated.topGameSummary = summary;
+      }
+      tx.set(ref, updated, { merge: true });
+    });
+  }
+
+  // Trim leaderboard to top 10 by topScore
+  const snap = await leaderboardCollection.orderBy('topScore', 'desc').get();
+  const docs = snap.docs;
+  if (docs.length > 10) {
+    const excess = docs.slice(10);
+    const batch = db.batch();
+    excess.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+  }
+};
+
+export const createGame = async ({
+  hostName = 'Host',
+  hostId,
+  initialPrompt,
+  turnDurationSeconds,
+  maxTurns,
+  maxPlayers,
+  mode = MODES.MULTI,
+}) => {
+  const cleanHost = hostName?.trim() || 'Host';
+  if (!hostId) {
+    throw new Error('hostId is required (Google user id)');
+  }
+  const prompt = initialPrompt?.trim() || 'A traveler enters a mysterious forest...';
+
+  const duration = clamp(turnDurationSeconds, 30, 120, 60);
+  const turnsCap = clamp(maxTurns, 1, 20, 5);
+  const playerCap = clamp(maxPlayers, 2, 7, 3);
+
+  const gameId = randomUUID();
+  const createdAt = nowIso();
+
+  const players = [{ id: hostId, name: cleanHost }];
+  if (mode === MODES.SINGLE) {
+    players.push({ id: 'ai-bot', name: 'StoryBot' });
+  }
+
+  const game = {
+    id: gameId,
+    hostId,
+    hostName: cleanHost,
+    status: 'waiting',
+    initialPrompt: prompt,
+    guidePrompt: prompt,
+    players,
+    turnsCount: 0,
+    turnDurationSeconds: duration,
+    maxTurns: turnsCap,
+    maxPlayers: playerCap,
+    turnDeadline: null,
+    currentPlayerIndex: 0,
+    currentPlayer: cleanHost,
+    currentPlayerId: hostId,
+    mode: mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI,
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  await gamesCollection.doc(gameId).set(game);
+  return game;
+};
+
+export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const trimmedName = playerName?.trim();
+
+  if (!trimmedName) {
+    return { error: 'Player name is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'Player id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status === 'finished') {
+      return { error: 'Game has finished', status: 400 };
+    }
+
+    if (game.mode === MODES.SINGLE) {
+      return { error: 'Cannot join a single-player game', status: 400 };
+    }
+
+    const already = (game.players || []).find((p) => p.id === playerId || p.name === trimmedName);
+    if (already) {
+      return { game };
+    }
+
+    if ((game.players || []).length >= game.maxPlayers) {
+      return { error: 'Game is full', status: 400 };
+    }
+
+    const updated = {
+      ...game,
+      players: [...(game.players || []), { id: playerId, name: trimmedName }],
+      updatedAt: nowIso(),
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
+};
+
+export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, text }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const trimmedName = playerName?.trim();
+
+  if (!trimmedName) {
+    return { error: 'Player name is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'Player id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status === 'finished') {
+      return { error: 'Game has finished', status: 400 };
+    }
+
+    const playerObj = (game.players || []).find((p) => p.id === playerId);
+    if (!playerObj) {
+      return { error: 'Player must join the game before submitting a turn', status: 403 };
+    }
+
+    if (playerId !== game.currentPlayerId) {
+      return {
+        error: `It is not ${trimmedName}'s turn`,
+        status: 403,
+        currentPlayer: game.currentPlayer,
+      };
+    }
+
+    // Start deadline if not set, then check timeout.
+    if (!game.turnDeadline) {
+      game.turnDeadline = new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString();
+    }
+
+    if (game.turnDeadline) {
+      const deadlineMs = new Date(game.turnDeadline).getTime();
+      if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+        const nextState = advanceTurnState({ ...game, status: 'timeout', updatedAt: nowIso() });
+        tx.set(gameRef, nextState);
+        return {
+          error: 'Turn timed out',
+          status: 409,
+          timedOutPlayer: game.currentPlayer,
+          nextPlayer: nextState.currentPlayer,
+          turnDeadline: nextState.turnDeadline,
+        };
+      }
+    }
+
+    if (!text || !text.trim()) {
+      return { error: 'Turn text is required', status: 400 };
+    }
+
+    const cleanText = text.trim();
+    const lines = cleanText.split(/\n/).filter(Boolean);
+    const lastLine = lines[lines.length - 1] || cleanText;
+
+    const order = (game.turnsCount || 0) + 1;
+    const guidePrompt = await generateGuidePrompt(lastLine, order);
+
+    const turnId = randomUUID();
+    const turn = {
+      id: turnId,
+      order,
+      playerName: trimmedName,
+      playerId,
+      text: cleanText,
+      guidePrompt,
+      createdAt: nowIso(),
+    };
+
+    const finishedHuman = game.maxTurns ? order >= game.maxTurns : false;
+
+    const baseUpdate = {
+      ...game,
+      guidePrompt,
+      turnsCount: order,
+      updatedAt: nowIso(),
+      status: finishedHuman ? 'finished' : 'active',
+      turnDeadline: finishedHuman
+        ? null
+        : new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+    };
+
+    let progressed = finishedHuman ? { ...baseUpdate, currentPlayerId: null, currentPlayer: null } : advanceTurnState(baseUpdate);
+
+    tx.set(gameRef, progressed);
+    tx.set(gameRef.collection('turns').doc(turnId), turn);
+
+    // Single-player: auto AI turn
+    if (!finishedHuman && game.mode === 'single') {
+      const aiOrder = progressed.turnsCount + 1;
+      const aiLastLine = cleanText;
+      const aiGuide = await generateGuidePrompt(aiLastLine, aiOrder);
+      const aiTurnId = randomUUID();
+      const aiTurn = {
+        id: aiTurnId,
+        order: aiOrder,
+        playerName: 'StoryBot',
+        playerId: 'ai-bot',
+        text: aiGuide,
+        guidePrompt: aiGuide,
+        createdAt: nowIso(),
+      };
+      progressed.turnsCount = aiOrder;
+      progressed.guidePrompt = aiGuide;
+      const finishedAfterAi = game.maxTurns ? aiOrder >= game.maxTurns : false;
+      progressed.status = finishedAfterAi ? 'finished' : 'active';
+      progressed.currentPlayer = finishedAfterAi ? null : game.players[0]?.name;
+      progressed.currentPlayerId = finishedAfterAi ? null : game.players[0]?.id;
+      progressed.turnDeadline = finishedAfterAi
+        ? null
+        : new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString();
+      progressed.updatedAt = nowIso();
+
+      tx.set(gameRef, progressed);
+      tx.set(gameRef.collection('turns').doc(aiTurnId), aiTurn);
+
+      return { game: progressed, turn, finished: finishedAfterAi };
+    }
+
+    return { game: progressed, turn, finished: finishedHuman };
+  });
+
+  if (result?.error) {
+    return result;
+  }
+
+  let scores = null;
+  if (result?.finished) {
+    try {
+      scores = await scoreGame(result.game);
+      await gamesCollection.doc(gameId).set({ scores }, { merge: true });
+      result.game.scores = scores;
+      // Persist last 5 games per player (exclude AI)
+      const turnsSnapshot = await gamesCollection
+        .doc(gameId)
+        .collection('turns')
+        .orderBy('order', 'asc')
+        .get();
+      const turnSummaries = turnsSnapshot.docs.map((d) => ({
+        order: d.data().order,
+        playerName: d.data().playerName,
+        text: d.data().text,
+        guidePrompt: d.data().guidePrompt,
+      }));
+      const summary = {
+        gameId,
+        createdAt: nowIso(),
+        summary: scores?.summary || 'Game finished',
+        maxTurns: result.game.maxTurns,
+        turns: turnSummaries,
+        scores: scores?.players || null,
+      };
+      const humanPlayers = (result.game.players || []).filter((p) => p.id !== 'ai-bot');
+      await Promise.all(
+        humanPlayers.map((p) => saveFinishedGameForUser(p.id, { ...summary, playerName: p.name })),
+      );
+      // Leaderboard update
+      await updateLeaderboard(scores, humanPlayers, summary);
+    } catch (error) {
+      console.warn('[gameService] scoring persistence failed:', error);
+    }
+  }
+
+  return { ...result, scores };
+};
+
+export const getGameState = async (gameId) => {
+  const snap = await gamesCollection.doc(gameId).get();
+  if (!snap.exists) {
+    return { error: 'Game not found', status: 404 };
+  }
+
+  const game = snap.data();
+  const deadlineMs = game.turnDeadline ? new Date(game.turnDeadline).getTime() : null;
+  const timeRemainingSeconds = Number.isFinite(deadlineMs)
+    ? Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))
+    : null;
+  const remainingTurns = game.maxTurns
+    ? Math.max(0, game.maxTurns - (game.turnsCount || 0))
+    : null;
+  const isFull = game.players.length >= game.maxPlayers;
+
+  return {
+    game,
+    info: {
+      status: game.status,
+      currentPlayer: game.currentPlayer,
+      nextDeadline: game.turnDeadline,
+      timeRemainingSeconds,
+      remainingTurns,
+      maxTurns: game.maxTurns,
+      playerCount: game.players.length,
+      maxPlayers: game.maxPlayers,
+      isFull,
+      scores: game.scores || null,
+    },
+  };
+};
+
+export const resetGames = async () => {
+  // Caution: for testing only; deletes all games.
+  const snaps = await gamesCollection.listDocuments();
+  const batches = [];
+  let batch = db.batch();
+  snaps.forEach((doc, idx) => {
+    batch.delete(doc);
+    if ((idx + 1) % 400 === 0) {
+      batches.push(batch.commit());
+      batch = db.batch();
+    }
+  });
+  batches.push(batch.commit());
+  await Promise.all(batches);
+};

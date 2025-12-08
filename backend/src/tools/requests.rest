@@ -1,14 +1,65 @@
 ### Create a new game
+# @name createGame
 POST http://localhost:3001/api/game/create
 Content-Type: application/json
 
-{}
-### Submit a turn
-POST http://localhost:3001/api/game/testId/turn
+{
+  "hostName": "Tester",
+  "hostId": "tester-user-1",
+  "initialPrompt": "A traveler enters a mysterious forest...",
+  "turnDurationSeconds": 60,
+  "maxTurns": 3,
+  "maxPlayers": 3,
+  "mode": "multi"
+}
+
+### Join an existing game (1)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
 Content-Type: application/json
 
 {
-    "text": "The hero entered the forest, unaware of the danger ahead."
+  "playerName": "Player2",
+  "playerId": "player2-user-1"
 }
-### Get game state
-GET http://localhost:3001/api/game/testId
+
+### Join an existing game (2)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
+Content-Type: application/json
+
+{
+  "playerName": "Player3",
+  "playerId": "player3-user-1"
+}
+
+### Submit a turn (uses ID from createGame)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+Content-Type: application/json
+
+{
+  "playerName": "Tester",
+  "playerId": "tester-user-1",
+  "text": "The hero entered the forest, unaware of the danger ahead."
+}
+
+### Submit turn 2 (Player2)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+Content-Type: application/json
+
+{
+  "playerName": "Player2",
+  "playerId": "player2-user-1",
+  "text": "A distant howl echoed, and the canopy seemed to bend toward him."
+}
+
+### Submit turn 3 (Player3) - should finish the game and return scores
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+Content-Type: application/json
+
+{
+  "playerName": "Player3",
+  "playerId": "player3-user-1",
+  "text": "A silver light flickered ahead, promising safety or a trap."
+}
+
+### Get game state (uses ID from createGame)
+GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}
