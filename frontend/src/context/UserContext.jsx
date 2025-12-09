@@ -3,14 +3,15 @@ import { createContext, useContext, useState } from 'react'
 const UserContext = createContext(null)
 
 export const UserProvider = ({ children }) => {
+  // Default test user for development (replace with actual auth later)
   const [user, setUser] = useState({
-    id: null,
-    username: null,
+    id: `test-user-${Date.now()}`,
+    username: 'TestPlayer',
     avatar: null,
     score: 0,
     coins: 0,
     level: 1,
-    isAuthenticated: false,
+    isAuthenticated: true,
   })
 
   const updateUser = (userData) => {

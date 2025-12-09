@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import PromptCard from '../../components/PromptCard/PromptCard'
 import StoryEditor from '../../components/StoryEditor/StoryEditor'
@@ -11,28 +11,79 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useUser } from '../../context/UserContext'
+import { useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useMatch } from '../../context/MatchContext'
 
 const Multiplayer = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
+  const { updateMatch } = useMatch()
   const [story, setStory] = useState('')
-  const [currentPrompt, setCurrentPrompt] = useState({
-    text: 'A mysterious door appears in the middle of the forest, glowing with an otherworldly light.',
-    category: 'twist',
+  
+  const gameId = searchParams.get('gameId')
+  const submitTurnMutation = useSubmitTurn()
+  const { data: gameData, isLoading } = useGameState(gameId, {
+    enabled: !!gameId,
+    refetchInterval: 2000, // Poll every 2 seconds for active games
   })
-  const [isMyTurn, setIsMyTurn] = useState(true)
-  const [timeRemaining, setTimeRemaining] = useState(120) // 2 minutes in seconds
 
-  const players = [
-    { id: '1', username: 'Player1', isActive: false },
-    { id: '2', username: 'Player2', isActive: false },
-    { id: '3', username: 'Player3', isActive: false },
-    { id: '4', username: 'You', isActive: isMyTurn },
-  ]
+  const game = gameData?.game
+  const gameInfo = gameData?.info
+  const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'A mysterious door appears in the middle of the forest, glowing with an otherworldly light.'
+  const isMyTurn = game?.currentPlayerId === user.id
+  const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const players = game?.players || []
 
-  const handleTimeComplete = () => {
-    // Handle turn end
-    setIsMyTurn(false)
+  // Redirect if no gameId
+  useEffect(() => {
+    if (!gameId) {
+      navigate('/lobby')
+    }
+  }, [gameId, navigate])
+
+  // Update match context when game state changes
+  useEffect(() => {
+    if (game) {
+      updateMatch({
+        id: game.id,
+        players: game.players,
+        currentPrompt: game.guidePrompt || game.initialPrompt,
+        currentTurn: game.currentPlayer,
+        status: game.status,
+        timeRemaining,
+      })
+    }
+  }, [game, timeRemaining])
+
+  // Navigate to story view when game finishes
+  useEffect(() => {
+    if (game?.status === 'finished' && gameId) {
+      navigate(`/story/${gameId}`)
+    }
+  }, [game?.status, gameId, navigate])
+
+  const handleSubmitTurn = () => {
+    if (!gameId || !story.trim() || !isMyTurn) return
+
+    submitTurnMutation.mutate({
+      gameId,
+      turnData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: story,
+      },
+    }, {
+      onSuccess: () => {
+        setStory('')
+      },
+      onError: (error) => {
+        console.error('Failed to submit turn:', error)
+        alert(error.message || 'Failed to submit turn. Please try again.')
+      },
+    })
   }
 
   return (
@@ -87,24 +138,34 @@ const Multiplayer = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left: Prompt Card */}
             <div className="lg:col-span-3">
-              <motion.div
-                animate={{ y: [0, -5, 0] }}
-                transition={{ duration: 3, repeat: Infinity }}
-              >
-                <PromptCard
-                  prompt={currentPrompt.text}
-                  category={currentPrompt.category}
-                  className="sticky top-8"
-                />
-              </motion.div>
-              <motion.div
-                className={`mt-4 text-center text-sm ${themeClasses.textSecondary}`}
-                animate={{ opacity: [0.7, 1, 0.7] }}
-                transition={{ duration: 2, repeat: Infinity }}
-              >
-                <span className="text-lg mr-2">⏱️</span>
-                Next prompt in: <span className="text-mint-pop font-bold">45s</span>
-              </motion.div>
+              {isLoading ? (
+                <Card className="p-6">
+                  <div className="text-center">Loading...</div>
+                </Card>
+              ) : (
+                <>
+                  <motion.div
+                    animate={{ y: [0, -5, 0] }}
+                    transition={{ duration: 3, repeat: Infinity }}
+                  >
+                    <PromptCard
+                      prompt={currentPrompt}
+                      category="twist"
+                      className="sticky top-8"
+                    />
+                  </motion.div>
+                  {timeRemaining > 0 && (
+                    <motion.div
+                      className={`mt-4 text-center text-sm ${themeClasses.textSecondary}`}
+                      animate={{ opacity: [0.7, 1, 0.7] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    >
+                      <span className="text-lg mr-2">⏱️</span>
+                      Time remaining: <span className="text-mint-pop font-bold">{timeRemaining}s</span>
+                    </motion.div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Center: Story Editor */}
@@ -114,6 +175,11 @@ const Multiplayer = () => {
                   <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>The Story</h3>
                   <div className={`text-sm ${themeClasses.textSecondary}`}>
                     Word count: <span className="text-mint-pop">{story.split(' ').filter(w => w).length}</span>
+                    {gameInfo && (
+                      <span className="ml-4">
+                        Turn {game?.turnsCount || 0} / {game?.maxTurns || 5}
+                      </span>
+                    )}
                   </div>
                 </div>
                 
@@ -121,8 +187,26 @@ const Multiplayer = () => {
                   content={story}
                   onChange={setStory}
                   isActive={isMyTurn}
-                  placeholder={isMyTurn ? "Continue the story..." : "Waiting for your turn..."}
+                  placeholder={isMyTurn ? "Continue the story..." : `Waiting for ${game?.currentPlayer || 'player'}...`}
                 />
+                
+                <div className="mt-4 flex gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={handleSubmitTurn}
+                    disabled={!isMyTurn || !story.trim() || submitTurnMutation.isPending}
+                    className="flex-1"
+                  >
+                    {submitTurnMutation.isPending ? 'Submitting...' : 'Submit Turn'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setStory('')}
+                    disabled={!isMyTurn}
+                  >
+                    Clear
+                  </Button>
+                </div>
 
                 {/* Thread Meter */}
                 <div className="mt-6">
@@ -161,48 +245,62 @@ const Multiplayer = () => {
               {/* Timer */}
               <Card className="p-6 flex flex-col items-center">
                 <h3 className={`text-lg font-header font-bold mb-4 ${themeClasses.text}`}>
-                  {isMyTurn ? 'Your Turn' : "Player's Turn"}
+                  {isMyTurn ? 'Your Turn' : `${game?.currentPlayer || "Player"}'s Turn`}
                 </h3>
-                <Timer
-                  initialTime={120}
-                  timeRemaining={timeRemaining}
-                  onComplete={handleTimeComplete}
-                  size={120}
-                />
+                {timeRemaining > 0 ? (
+                  <Timer
+                    initialTime={game?.turnDurationSeconds || 120}
+                    timeRemaining={timeRemaining}
+                    size={120}
+                  />
+                ) : (
+                  <div className="text-4xl">⏱️</div>
+                )}
               </Card>
 
               {/* Players List */}
               <Card className="p-6">
                 <h3 className={`text-lg font-header font-bold mb-4 ${themeClasses.text}`}>Players</h3>
-                <div className="space-y-4">
-                  {players.map((player, index) => (
-                    <motion.div
-                      key={player.id}
-                      className={`
-                        flex items-center gap-3 p-3 rounded-lg
-                        ${player.isActive 
-                          ? 'bg-mint-pop bg-opacity-20 border-2 border-mint-pop' 
-                          : themeClasses.card
-                        }
-                        transition-all
-                      `}
-                      animate={player.isActive ? { scale: [1, 1.02, 1] } : {}}
-                      transition={{ repeat: player.isActive ? Infinity : 0, duration: 2 }}
-                    >
-                      <Avatar user={player} size="sm" />
-                      <div className="flex-1">
-                        <div className={`font-bold text-sm ${themeClasses.text}`}>{player.username}</div>
-                        {player.isActive && (
-                          <div className="text-xs text-mint-pop">Writing...</div>
-                        )}
-                      </div>
-                      {/* Thread connection indicator */}
-                      {index < players.length - 1 && (
-                        <div className="w-1 h-8 bg-electric-purple opacity-50" />
-                      )}
-                    </motion.div>
-                  ))}
-                </div>
+                {isLoading ? (
+                  <div className="text-center py-4">Loading...</div>
+                ) : (
+                  <div className="space-y-4">
+                    {players.map((player, index) => {
+                      const isActive = player.id === game?.currentPlayerId
+                      const isCurrentUser = player.id === user.id
+                      return (
+                        <motion.div
+                          key={player.id}
+                          className={`
+                            flex items-center gap-3 p-3 rounded-lg
+                            ${isActive 
+                              ? 'bg-mint-pop bg-opacity-20 border-2 border-mint-pop' 
+                              : themeClasses.card
+                            }
+                            transition-all
+                          `}
+                          animate={isActive ? { scale: [1, 1.02, 1] } : {}}
+                          transition={{ repeat: isActive ? Infinity : 0, duration: 2 }}
+                        >
+                          <Avatar user={{ id: player.id, username: player.name }} size="sm" />
+                          <div className="flex-1">
+                            <div className={`font-bold text-sm ${themeClasses.text}`}>
+                              {player.name}
+                              {isCurrentUser && ' (You)'}
+                            </div>
+                            {isActive && (
+                              <div className="text-xs text-mint-pop">Writing...</div>
+                            )}
+                          </div>
+                          {/* Thread connection indicator */}
+                          {index < players.length - 1 && (
+                            <div className="w-1 h-8 bg-electric-purple opacity-50" />
+                          )}
+                        </motion.div>
+                      )
+                    })}
+                  </div>
+                )}
               </Card>
 
               {/* AI Drama Meter */}

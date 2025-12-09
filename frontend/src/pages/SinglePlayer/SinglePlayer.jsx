@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import PromptCard from '../../components/PromptCard/PromptCard'
 import StoryEditor from '../../components/StoryEditor/StoryEditor'
@@ -10,15 +10,101 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useUser } from '../../context/UserContext'
+import { useCreateGame, useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useMatch } from '../../context/MatchContext'
 
 const SinglePlayer = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
+  const { startMatch, updateMatch } = useMatch()
   const [story, setStory] = useState('')
-  const [currentPrompt, setCurrentPrompt] = useState({
-    text: 'You wake up in a world where gravity works sideways.',
-    category: 'chaos',
+  
+  const gameId = searchParams.get('gameId')
+  const createGameMutation = useCreateGame()
+  const submitTurnMutation = useSubmitTurn()
+  const { data: gameData, isLoading } = useGameState(gameId, {
+    enabled: !!gameId,
+    refetchInterval: gameData?.game?.status === 'active' ? 2000 : false,
   })
+
+  const game = gameData?.game
+  const gameInfo = gameData?.info
+  const currentPrompt = game?.initialPrompt || game?.guidePrompt || 'You wake up in a world where gravity works sideways.'
+  const isMyTurn = game?.currentPlayerId === user.id
+  const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+
+  // Create game on mount if no gameId
+  useEffect(() => {
+    if (!gameId && user.id && !createGameMutation.isPending) {
+      createGameMutation.mutate({
+        hostName: user.username || 'Player',
+        hostId: user.id,
+        initialPrompt: 'You wake up in a world where gravity works sideways.',
+        turnDurationSeconds: 300, // 5 minutes
+        maxTurns: 5,
+        maxPlayers: 2,
+        mode: 'single',
+      }, {
+        onSuccess: (data) => {
+          if (data?.game?.id) {
+            navigate(`/singleplayer?gameId=${data.game.id}`, { replace: true })
+            startMatch({
+              id: data.game.id,
+              mode: 'singleplayer',
+              players: data.game.players,
+              currentPrompt: data.game.initialPrompt,
+              story: '',
+              timeLimit: 5,
+              status: 'playing',
+            })
+          }
+        },
+        onError: (error) => {
+          console.error('Failed to create game:', error)
+          alert('Failed to create game. Please try again.')
+        },
+      })
+    }
+  }, [gameId, user.id])
+
+  // Update match context when game state changes
+  useEffect(() => {
+    if (game) {
+      updateMatch({
+        id: game.id,
+        currentPrompt: game.guidePrompt || game.initialPrompt,
+        currentTurn: game.currentPlayer,
+        status: game.status,
+      })
+    }
+  }, [game])
+
+  const handleSubmitTurn = () => {
+    if (!gameId || !story.trim() || !isMyTurn) return
+
+    submitTurnMutation.mutate({
+      gameId,
+      turnData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: story,
+      },
+    }, {
+      onSuccess: (data) => {
+        setStory('')
+        if (data?.game?.status === 'finished') {
+          navigate(`/story/${gameId}`)
+        }
+      },
+      onError: (error) => {
+        console.error('Failed to submit turn:', error)
+        alert(error.message || 'Failed to submit turn. Please try again.')
+      },
+    })
+  }
 
   return (
     <div className={`min-h-screen relative transition-colors ${themeClasses.bg}`}>
@@ -73,8 +159,8 @@ const SinglePlayer = () => {
             {/* Left: Prompt */}
             <div className="lg:col-span-1">
               <PromptCard
-                prompt={currentPrompt.text}
-                category={currentPrompt.category}
+                prompt={currentPrompt}
+                category="chaos"
               />
             </div>
 
@@ -82,35 +168,56 @@ const SinglePlayer = () => {
             <div className="lg:col-span-2">
               <Card className="p-6">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>Your Story</h3>
-                  <Timer
-                    initialTime={300}
-                    size={80}
-                  />
+                  <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
+                    {isMyTurn ? 'Your Turn' : "StoryBot's Turn"}
+                  </h3>
+                  {timeRemaining > 0 && (
+                    <Timer
+                      initialTime={300}
+                      timeRemaining={timeRemaining}
+                      size={80}
+                    />
+                  )}
                 </div>
                 
-                <StoryEditor
-                  content={story}
-                  onChange={setStory}
-                  isActive={true}
-                  placeholder="Start writing your story..."
-                />
+                {isLoading ? (
+                  <div className="text-center py-8">
+                    <div className="text-lg">Loading game...</div>
+                  </div>
+                ) : (
+                  <>
+                    <StoryEditor
+                      content={story}
+                      onChange={setStory}
+                      isActive={isMyTurn}
+                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for StoryBot..."}
+                    />
 
-                <div className="mt-6 flex gap-4">
-                  <Button
-                    variant="primary"
-                    className="flex-1"
-                    onClick={() => navigate('/story/123')}
-                  >
-                    Submit Story
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setStory('')}
-                  >
-                    Clear
-                  </Button>
-                </div>
+                    <div className="mt-6 flex gap-4">
+                      <Button
+                        variant="primary"
+                        className="flex-1"
+                        onClick={handleSubmitTurn}
+                        disabled={!isMyTurn || !story.trim() || submitTurnMutation.isPending}
+                      >
+                        {submitTurnMutation.isPending ? 'Submitting...' : 'Submit Story'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setStory('')}
+                        disabled={!isMyTurn}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                    
+                    {gameInfo && (
+                      <div className="mt-4 text-sm text-center opacity-70">
+                        Turn {game?.turnsCount || 0} / {game?.maxTurns || 5}
+                      </div>
+                    )}
+                  </>
+                )}
               </Card>
             </div>
           </div>
