@@ -34,8 +34,10 @@ export const useJoinGame = () => {
   return useMutation({
     mutationFn: ({ gameId, playerData }) => gameAPI.joinGame(gameId, playerData),
     onSuccess: (data, variables) => {
-      // Invalidate game state to refetch
+      // Invalidate and immediately refetch game state
       queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      // Force immediate refetch
+      queryClient.refetchQueries({ queryKey: ['game', variables.gameId] });
     },
   });
 };
@@ -63,26 +65,29 @@ export const useSubmitTurn = () => {
  */
 export const useGameState = (gameId, options = {}) => {
   const { enabled = true, refetchInterval = null, pollWaiting = false } = options;
+  const pollInterval = refetchInterval || 2000;
 
   return useQuery({
     queryKey: ['game', gameId],
     queryFn: () => gameAPI.getGameState(gameId),
     enabled: enabled && !!gameId,
     refetchInterval: (query) => {
-      // Auto-refetch if game is active, or if polling waiting games is enabled
+      // If pollWaiting is enabled, always poll (for lobby)
+      if (pollWaiting) {
+        return pollInterval;
+      }
+      
+      // Auto-refetch if game is active
       const game = query?.state?.data?.game;
       if (game) {
         if (game.status === 'active') {
-          return refetchInterval || 2000; // Poll every 2 seconds for active games
-        }
-        if (pollWaiting && game.status === 'waiting') {
-          return refetchInterval || 2000; // Poll for waiting games (e.g., in lobby)
+          return pollInterval; // Poll every 2 seconds for active games
         }
       }
-      return false; // Don't poll for finished games
+      return false; // Don't poll for finished games or when not needed
     },
     refetchIntervalInBackground: true,
-    staleTime: 1000, // Consider data stale after 1 second
+    staleTime: 0, // Always consider data stale for real-time updates
   });
 };
 
