@@ -4,8 +4,15 @@ const UserContext = createContext(null)
 
 export const UserProvider = ({ children }) => {
   // Default test user for development (replace with actual auth later)
+  // Generate a Firebase-compatible user ID (alphanumeric, hyphens, underscores only)
+  const generateTestUserId = () => {
+    const timestamp = Date.now().toString(36)
+    const random = Math.random().toString(36).substring(2, 9)
+    return `testuser_${timestamp}_${random}`
+  }
+
   const [user, setUser] = useState({
-    id: `test-user-${Date.now()}`,
+    id: generateTestUserId(),
     username: 'TestPlayer',
     avatar: null,
     score: 0,

@@ -3,6 +3,12 @@
 .env.local
 .env.*.local
 
+# Firebase credentials
+firebase-service-account.json
+*.json
+!package.json
+!package-lock.json
+
 # Dependencies
 node_modules/
 

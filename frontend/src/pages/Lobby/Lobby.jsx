@@ -252,8 +252,29 @@ const Lobby = () => {
                 }`}>
                   {players.length} / {maxPlayers} players joined
                   {gameId && (
-                    <div className="text-xs mt-2 opacity-70">
-                      Game ID: {gameId.slice(0, 8)}...
+                    <div className="mt-4">
+                      <div className="text-xs mb-2 opacity-70">Game ID</div>
+                      <div className="flex items-center justify-center gap-2">
+                        <code className={`px-4 py-2 rounded-lg font-mono text-lg font-bold tracking-widest ${
+                          isDark ? 'bg-soft-charcoal text-mint-pop' : 'bg-gray-100 text-electric-purple'
+                        }`}>
+                          {gameId}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.origin}/lobby?gameId=${gameId}`)
+                            alert('Game link copied to clipboard!')
+                          }}
+                          className="text-xs"
+                        >
+                          📋 Copy Link
+                        </Button>
+                      </div>
+                      <div className="text-xs mt-2 opacity-60">
+                        Share this ID with friends to join
+                      </div>
                     </div>
                   )}
                 </div>

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import gameRoutes from './routes/gameRoutes.js';
 import cors from "cors";

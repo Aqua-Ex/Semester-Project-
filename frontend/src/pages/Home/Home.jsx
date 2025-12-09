@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import Card from '../../components/Cards/Card'
@@ -6,6 +7,76 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground, PatternBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
+import { useThemeClasses } from '../../hooks/useThemeClasses'
+
+const JoinGameForm = () => {
+  const navigate = useNavigate()
+  const themeClasses = useThemeClasses()
+  const [gameId, setGameId] = useState('')
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleJoin = async (e) => {
+    e.preventDefault()
+    setError('')
+    
+    if (!gameId.trim()) {
+      setError('Please enter a game ID')
+      return
+    }
+
+    // Validate format (6 characters, alphanumeric)
+    const cleanGameId = gameId.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (cleanGameId.length !== 6) {
+      setError('Game ID must be 6 characters')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      // Navigate to lobby with gameId - it will auto-join
+      navigate(`/lobby?gameId=${cleanGameId}`)
+    } catch (err) {
+      setError('Failed to join game. Please check the game ID.')
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleJoin} className="space-y-4">
+      <div>
+        <input
+          type="text"
+          value={gameId}
+          onChange={(e) => {
+            const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+            setGameId(value)
+            setError('')
+          }}
+          placeholder="Enter 6-character game ID"
+          maxLength={6}
+          className={`w-full px-4 py-3 rounded-lg text-center text-2xl font-mono font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-mint-pop ${
+            themeClasses.isDark 
+              ? 'bg-deep-graphite border border-soft-charcoal text-white' 
+              : 'bg-light-card border border-gray-200 text-light-text'
+          }`}
+          style={{ letterSpacing: '0.5em' }}
+        />
+        {error && (
+          <p className="text-red-500 text-sm mt-2 text-center">{error}</p>
+        )}
+      </div>
+      <Button
+        type="submit"
+        variant="primary"
+        className="w-full"
+        disabled={isLoading || !gameId.trim()}
+      >
+        {isLoading ? 'Joining...' : 'Join Game →'}
+      </Button>
+    </form>
+  )
+}
 
 const Home = () => {
   const navigate = useNavigate()
@@ -201,6 +272,26 @@ const Home = () => {
             </motion.div>
           ))}
         </div>
+
+        {/* Join Game Section */}
+        <motion.div
+          className="max-w-md mx-auto mb-16 relative z-10"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <Card className="p-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-electric-purple to-mint-pop opacity-10 rounded-full blur-2xl" />
+            <div className="relative z-10">
+              <h3 className={`text-2xl font-header font-bold mb-4 text-center ${
+                isDark ? 'text-white' : 'text-light-text'
+              }`}>
+                🎮 Join a Game
+              </h3>
+              <JoinGameForm />
+            </div>
+          </Card>
+        </motion.div>
 
         {/* Navigation Links */}
         <motion.div

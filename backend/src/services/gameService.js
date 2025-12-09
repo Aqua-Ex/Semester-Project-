@@ -3,6 +3,19 @@ import { db } from '../firebase.js';
 import { generateGuidePrompt } from './aiService.js';
 import { scoreGame } from './scoringService.js';
 
+/**
+ * Generate a short game ID (5-6 characters, alphanumeric uppercase)
+ * Uses a combination of timestamp and random characters for uniqueness
+ */
+const generateShortGameId = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars (0, O, I, 1)
+  const timestamp = Date.now().toString(36).toUpperCase().slice(-3); // Last 3 chars of base36 timestamp
+  const random = Array.from({ length: 3 }, () => 
+    chars[Math.floor(Math.random() * chars.length)]
+  ).join('');
+  return (timestamp + random).slice(0, 6); // Ensure exactly 6 characters
+};
+
 const gamesCollection = db.collection('games');
 const usersCollection = db.collection('users');
 const leaderboardCollection = db.collection('leaderboard');
@@ -115,13 +128,33 @@ export const createGame = async ({
   if (!hostId) {
     throw new Error('hostId is required (Google user id)');
   }
+  // Validate hostId format for Firebase (no forward slashes, not empty, valid UTF-8)
+  if (typeof hostId !== 'string' || hostId.includes('/') || hostId.length === 0) {
+    throw new Error('Invalid hostId format. Must be a non-empty string without forward slashes.');
+  }
   const prompt = initialPrompt?.trim() || 'A traveler enters a mysterious forest...';
 
   const duration = clamp(turnDurationSeconds, 30, 120, 60);
   const turnsCap = clamp(maxTurns, 1, 20, 5);
   const playerCap = clamp(maxPlayers, 2, 7, 3);
 
-  const gameId = randomUUID();
+  // Generate short game ID and ensure it's unique
+  let gameId = generateShortGameId();
+  let attempts = 0;
+  const maxAttempts = 10;
+  while (attempts < maxAttempts) {
+    const existing = await gamesCollection.doc(gameId).get();
+    if (!existing.exists) {
+      break; // ID is unique
+    }
+    gameId = generateShortGameId(); // Regenerate if collision
+    attempts++;
+  }
+  // Fallback to UUID if we can't find a unique short ID (very unlikely)
+  if (attempts >= maxAttempts) {
+    gameId = randomUUID().replace(/-/g, '').substring(0, 6).toUpperCase();
+  }
+  
   const createdAt = nowIso();
 
   const players = [{ id: hostId, name: cleanHost }];
@@ -150,8 +183,17 @@ export const createGame = async ({
     updatedAt: createdAt,
   };
 
-  await gamesCollection.doc(gameId).set(game);
-  return game;
+  try {
+    await gamesCollection.doc(gameId).set(game);
+    return game;
+  } catch (error) {
+    console.error('[createGame] Firebase error:', error);
+    // Provide more helpful error messages
+    if (error.message && error.message.includes('pattern')) {
+      throw new Error(`Invalid data format: ${error.message}. Please check hostId and other field values.`);
+    }
+    throw error;
+  }
 };
 
 export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) => {
