@@ -62,19 +62,24 @@ export const useSubmitTurn = () => {
  * Automatically polls if game is active
  */
 export const useGameState = (gameId, options = {}) => {
-  const { enabled = true, refetchInterval = null } = options;
+  const { enabled = true, refetchInterval = null, pollWaiting = false } = options;
 
   return useQuery({
     queryKey: ['game', gameId],
     queryFn: () => gameAPI.getGameState(gameId),
     enabled: enabled && !!gameId,
     refetchInterval: (query) => {
-      // Auto-refetch if game is active
+      // Auto-refetch if game is active, or if polling waiting games is enabled
       const game = query?.state?.data?.game;
-      if (game && game.status === 'active') {
-        return refetchInterval || 2000; // Poll every 2 seconds for active games
+      if (game) {
+        if (game.status === 'active') {
+          return refetchInterval || 2000; // Poll every 2 seconds for active games
+        }
+        if (pollWaiting && game.status === 'waiting') {
+          return refetchInterval || 2000; // Poll for waiting games (e.g., in lobby)
+        }
       }
-      return false; // Don't poll for finished/waiting games
+      return false; // Don't poll for finished games
     },
     refetchIntervalInBackground: true,
     staleTime: 1000, // Consider data stale after 1 second
@@ -87,6 +92,32 @@ export const useGameState = (gameId, options = {}) => {
 export const usePollGameState = (gameId, interval = 2000) => {
   return useGameState(gameId, {
     refetchInterval: interval,
+  });
+};
+
+/**
+ * Hook to fetch game turns
+ */
+export const useGameTurns = (gameId) => {
+  return useQuery({
+    queryKey: ['game', gameId, 'turns'],
+    queryFn: () => gameAPI.getGameTurns(gameId),
+    enabled: !!gameId,
+    staleTime: 2000,
+  });
+};
+
+/**
+ * Hook to start a game
+ */
+export const useStartGame = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (gameId) => gameAPI.startGame(gameId),
+    onSuccess: (data, gameId) => {
+      queryClient.invalidateQueries({ queryKey: ['game', gameId] });
+    },
   });
 };
 

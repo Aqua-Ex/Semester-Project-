@@ -12,7 +12,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 import { useUser } from '../../context/UserContext'
-import { useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useSubmitTurn, useGameState, useGameTurns } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 
 const Multiplayer = () => {
@@ -29,13 +29,20 @@ const Multiplayer = () => {
     enabled: !!gameId,
     refetchInterval: 2000, // Poll every 2 seconds for active games
   })
+  const { data: turnsData } = useGameTurns(gameId)
 
   const game = gameData?.game
   const gameInfo = gameData?.info
+  const turns = turnsData?.turns || []
   const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'A mysterious door appears in the middle of the forest, glowing with an otherworldly light.'
   const isMyTurn = game?.currentPlayerId === user.id
   const timeRemaining = gameInfo?.timeRemainingSeconds || 0
   const players = game?.players || []
+  
+  // Build accumulated story from turns
+  const accumulatedStory = turns.length > 0 
+    ? turns.map(turn => turn.text).join('\n\n')
+    : game?.initialPrompt || ''
 
   // Redirect if no gameId
   useEffect(() => {
@@ -183,6 +190,16 @@ const Multiplayer = () => {
                   </div>
                 </div>
                 
+                {/* Accumulated Story Display */}
+                {accumulatedStory && (
+                  <div className={`mb-4 p-4 rounded-lg max-h-48 overflow-y-auto ${themeClasses.card}`}>
+                    <div className={`text-sm ${themeClasses.textSecondary} mb-2`}>Story so far:</div>
+                    <div className={`text-sm whitespace-pre-wrap ${themeClasses.text}`}>
+                      {accumulatedStory}
+                    </div>
+                  </div>
+                )}
+                
                 <StoryEditor
                   content={story}
                   onChange={setStory}
@@ -223,6 +240,44 @@ const Multiplayer = () => {
                     />
                   </div>
                 </div>
+
+                {/* Turn History */}
+                {turns.length > 0 && (
+                  <div className="mt-6">
+                    <details className={`${themeClasses.card} p-4 rounded-lg`}>
+                      <summary className={`cursor-pointer font-bold ${themeClasses.text}`}>
+                        📜 Turn History ({turns.length} turns)
+                      </summary>
+                      <div className="mt-4 space-y-3 max-h-64 overflow-y-auto">
+                        {turns.map((turn) => {
+                          const isAI = turn.playerId === 'ai-bot'
+                          const isCurrentUser = turn.playerId === user.id
+                          return (
+                            <div
+                              key={turn.id}
+                              className={`p-3 rounded-lg text-sm ${
+                                isCurrentUser ? 'bg-mint-pop bg-opacity-20' : themeClasses.card
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold">
+                                  {isAI ? '🤖 StoryBot' : turn.playerName}
+                                  {isCurrentUser && ' (You)'}
+                                </span>
+                                <span className={`text-xs ${themeClasses.textSecondary}`}>
+                                  Turn {turn.order}
+                                </span>
+                              </div>
+                              <div className={`whitespace-pre-wrap ${themeClasses.text}`}>
+                                {turn.text}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </details>
+                  </div>
+                )}
 
                 {/* Reaction Buttons */}
                 <div className="mt-6 flex gap-2">

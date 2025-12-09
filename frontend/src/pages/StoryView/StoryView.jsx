@@ -6,7 +6,7 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
-import { useGameState } from '../../hooks/useGameAPI'
+import { useGameState, useGameTurns } from '../../hooks/useGameAPI'
 
 const StoryView = () => {
   const { id } = useParams()
@@ -16,9 +16,11 @@ const StoryView = () => {
   const { data: gameData, isLoading, error } = useGameState(id, {
     enabled: !!id,
   })
+  const { data: turnsData } = useGameTurns(id)
 
   const game = gameData?.game
   const gameInfo = gameData?.info
+  const turns = turnsData?.turns || []
   
   // Build story content from game data
   const storyTitle = game?.initialPrompt || 'Untitled Story'
@@ -35,7 +37,13 @@ const StoryView = () => {
     return sum + (creativity + cohesion + momentum) / 3
   }, 0) / Math.max(Object.keys(playerScores).length, 1)
   
-  const storyContent = game?.summary || game?.scores?.summary || 'Story content will be displayed here once turns are available.'
+  // Build story from turns, or use summary if available
+  const storyContent = turns.length > 0
+    ? turns.map((turn, index) => {
+        const isAI = turn.playerId === 'ai-bot'
+        return `${isAI ? '🤖 StoryBot' : turn.playerName} (Turn ${turn.order}):\n${turn.text}`
+      }).join('\n\n')
+    : game?.summary || game?.scores?.summary || 'Story content will be displayed here once turns are available.'
 
   return (
     <div className={`min-h-screen relative transition-colors ${themeClasses.bg}`}>

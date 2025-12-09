@@ -101,6 +101,28 @@ export const gameAPI = {
       method: 'GET',
     });
   },
+
+  /**
+   * Get all turns for a game
+   * @param {string} gameId - Game ID
+   * @returns {Promise<Object>} Array of turns
+   */
+  getGameTurns: async (gameId) => {
+    return apiRequest(`/api/game/${gameId}/turns`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Start a game (change status from waiting to active)
+   * @param {string} gameId - Game ID
+   * @returns {Promise<Object>} Updated game object
+   */
+  startGame: async (gameId) => {
+    return apiRequest(`/api/game/${gameId}/start`, {
+      method: 'POST',
+    });
+  },
 };
 
 /**

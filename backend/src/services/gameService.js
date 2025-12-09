@@ -453,6 +453,57 @@ export const getGameState = async (gameId) => {
   };
 };
 
+export const getGameTurns = async (gameId) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const gameSnap = await gameRef.get();
+  if (!gameSnap.exists) {
+    return { error: 'Game not found', status: 404 };
+  }
+
+  const turnsSnapshot = await gameRef.collection('turns').orderBy('order', 'asc').get();
+  const turns = turnsSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  return { turns };
+};
+
+export const startGame = async (gameId) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not in waiting status', status: 400 };
+    }
+
+    if (game.players.length < 2) {
+      return { error: 'Need at least 2 players to start', status: 400 };
+    }
+
+    const updated = {
+      ...game,
+      status: 'active',
+      currentPlayerIndex: 0,
+      currentPlayer: game.players[0]?.name,
+      currentPlayerId: game.players[0]?.id,
+      turnDeadline: new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+      updatedAt: nowIso(),
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
+};
+
 export const resetGames = async () => {
   // Caution: for testing only; deletes all games.
   const snaps = await gamesCollection.listDocuments();

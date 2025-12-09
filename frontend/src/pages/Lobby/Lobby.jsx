@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useJoinGame, useGameState } from '../../hooks/useGameAPI'
+import { useCreateGame, useJoinGame, useGameState, useStartGame } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 
@@ -30,9 +30,11 @@ const Lobby = () => {
   
   const createGameMutation = useCreateGame()
   const joinGameMutation = useJoinGame()
+  const startGameMutation = useStartGame()
   const { data: gameData, isLoading: isLoadingGame } = useGameState(gameId, {
     enabled: !!gameId,
     refetchInterval: 2000, // Poll every 2 seconds
+    pollWaiting: true, // Poll even when game is waiting (for lobby)
   })
 
   const game = gameData?.game
@@ -43,7 +45,7 @@ const Lobby = () => {
 
   // Create game on mount if host
   useEffect(() => {
-    if (isHost && !createGameMutation.isPending && !gameId && user.id) {
+    if (isHost && !createGameMutation.isPending && !gameId && user.id && !createGameMutation.isSuccess) {
       const initialPrompt = 'A traveler enters a mysterious forest...'
       createGameMutation.mutate({
         hostName: user.username || 'Player',
@@ -65,6 +67,7 @@ const Lobby = () => {
         },
       })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost, user.id])
 
   // Join game if not host and not already joined
@@ -89,17 +92,25 @@ const Lobby = () => {
   }, [gameId, game, user.id, isHost, isFull])
 
   const handleStartGame = () => {
-    if (game && canStart) {
-      startMatch({
-        id: game.id,
-        mode: 'multiplayer',
-        players,
-        currentPrompt: game.initialPrompt,
-        story: '',
-        timeLimit,
-        status: 'playing',
+    if (game && canStart && !startGameMutation.isPending) {
+      startGameMutation.mutate(game.id, {
+        onSuccess: (data) => {
+          startMatch({
+            id: game.id,
+            mode: 'multiplayer',
+            players,
+            currentPrompt: game.initialPrompt,
+            story: '',
+            timeLimit,
+            status: 'playing',
+          })
+          navigate(`/multiplayer?gameId=${game.id}`)
+        },
+        onError: (error) => {
+          console.error('Failed to start game:', error)
+          alert(error.message || 'Failed to start game. Please try again.')
+        },
       })
-      navigate(`/multiplayer?gameId=${game.id}`)
     }
   }
 
@@ -285,24 +296,39 @@ const Lobby = () => {
             {/* Settings & Chat */}
             <div className="space-y-6">
               {/* Time Limit */}
-              <Card className="p-6">
-                <h3 className="text-xl font-header font-bold mb-4">
-                  Time Limit
-                </h3>
-                <div className="flex gap-2">
-                  {[5, 10, 15].map((time) => (
-                    <Button
-                      key={time}
-                      variant={timeLimit === time ? 'primary' : 'ghost'}
-                      size="sm"
-                      onClick={() => setTimeLimit(time)}
-                      className="flex-1"
-                    >
-                      {time}m
-                    </Button>
-                  ))}
-                </div>
-              </Card>
+              {isHost && !gameId && (
+                <Card className="p-6">
+                  <h3 className="text-xl font-header font-bold mb-4">
+                    Time Limit
+                  </h3>
+                  <div className="flex gap-2">
+                    {[5, 10, 15].map((time) => (
+                      <Button
+                        key={time}
+                        variant={timeLimit === time ? 'primary' : 'ghost'}
+                        size="sm"
+                        onClick={() => setTimeLimit(time)}
+                        className="flex-1"
+                        disabled={createGameMutation.isPending}
+                      >
+                        {time}m
+                      </Button>
+                    ))}
+                  </div>
+                </Card>
+              )}
+              {gameId && game && (
+                <Card className="p-6">
+                  <h3 className="text-xl font-header font-bold mb-4">
+                    Game Settings
+                  </h3>
+                  <div className={`text-sm space-y-2 ${themeClasses.textSecondary}`}>
+                    <div>Time Limit: {Math.floor((game.turnDurationSeconds || 0) / 60)} minutes</div>
+                    <div>Max Turns: {game.maxTurns || 5}</div>
+                    <div>Max Players: {game.maxPlayers || 4}</div>
+                  </div>
+                </Card>
+              )}
 
               {/* Chat Area */}
               <Card className="p-6 h-64 flex flex-col">
@@ -373,10 +399,10 @@ const Lobby = () => {
                   variant="primary"
                   size="lg"
                   className="w-full"
-                  disabled={!canStart || isLoading}
+                  disabled={!canStart || isLoading || startGameMutation.isPending}
                   onClick={handleStartGame}
                 >
-                  {isLoading ? 'Loading...' : canStart ? '🚀 Start Game' : `Waiting for players... (${players.length}/${maxPlayers})`}
+                  {isLoading || startGameMutation.isPending ? 'Loading...' : canStart ? '🚀 Start Game' : `Waiting for players... (${players.length}/${maxPlayers})`}
                 </Button>
               </motion.div>
             </div>

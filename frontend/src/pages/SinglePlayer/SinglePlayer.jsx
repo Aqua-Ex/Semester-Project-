@@ -11,7 +11,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useCreateGame, useSubmitTurn, useGameState, useGameTurns } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 
 const SinglePlayer = () => {
@@ -27,17 +27,22 @@ const SinglePlayer = () => {
   const submitTurnMutation = useSubmitTurn()
   const { data: gameData, isLoading, error: gameError } = useGameState(gameId, {
     enabled: !!gameId,
-    refetchInterval: (query) => {
-      const game = query?.state?.data?.game
-      return game && game.status === 'active' ? 2000 : false
-    },
+    refetchInterval: 2000, // Poll every 2 seconds for active games
+    pollWaiting: false, // Don't poll waiting games in single player
   })
+  const { data: turnsData } = useGameTurns(gameId)
 
   const game = gameData?.game
   const gameInfo = gameData?.info
+  const turns = turnsData?.turns || []
   const currentPrompt = game?.initialPrompt || game?.guidePrompt || 'You wake up in a world where gravity works sideways.'
   const isMyTurn = game?.currentPlayerId === user?.id
   const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  
+  // Build accumulated story from turns
+  const accumulatedStory = turns.length > 0 
+    ? turns.map(turn => turn.text).join('\n\n')
+    : game?.initialPrompt || ''
   
   // Show loading state while creating game
   const isCreatingGame = !gameId && !game && createGameMutation.isPending
@@ -217,11 +222,21 @@ const SinglePlayer = () => {
                     </div>
                   ) : (
                   <>
+                    {/* Accumulated Story Display */}
+                    {accumulatedStory && (
+                      <div className={`mb-4 p-4 rounded-lg max-h-48 overflow-y-auto ${themeClasses.card}`}>
+                        <div className={`text-sm ${themeClasses.textSecondary} mb-2`}>Story so far:</div>
+                        <div className={`text-sm whitespace-pre-wrap ${themeClasses.text}`}>
+                          {accumulatedStory}
+                        </div>
+                      </div>
+                    )}
+                    
                     <StoryEditor
                       content={story}
                       onChange={setStory}
                       isActive={isMyTurn}
-                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for StoryBot..."}
+                      placeholder={isMyTurn ? "Continue the story..." : "Waiting for StoryBot..."}
                     />
 
                     <div className="mt-6 flex gap-4">
@@ -245,6 +260,44 @@ const SinglePlayer = () => {
                     {gameInfo && (
                       <div className="mt-4 text-sm text-center opacity-70">
                         Turn {game?.turnsCount || 0} / {game?.maxTurns || 5}
+                      </div>
+                    )}
+                    
+                    {/* Turn History */}
+                    {turns.length > 0 && (
+                      <div className="mt-6">
+                        <details className={`${themeClasses.card} p-4 rounded-lg`}>
+                          <summary className={`cursor-pointer font-bold ${themeClasses.text}`}>
+                            📜 Turn History ({turns.length} turns)
+                          </summary>
+                          <div className="mt-4 space-y-3 max-h-64 overflow-y-auto">
+                            {turns.map((turn) => {
+                              const isAI = turn.playerId === 'ai-bot'
+                              const isCurrentUser = turn.playerId === user?.id
+                              return (
+                                <div
+                                  key={turn.id}
+                                  className={`p-3 rounded-lg text-sm ${
+                                    isCurrentUser ? 'bg-mint-pop bg-opacity-20' : themeClasses.card
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-bold">
+                                      {isAI ? '🤖 StoryBot' : turn.playerName}
+                                      {isCurrentUser && ' (You)'}
+                                    </span>
+                                    <span className={`text-xs ${themeClasses.textSecondary}`}>
+                                      Turn {turn.order}
+                                    </span>
+                                  </div>
+                                  <div className={`whitespace-pre-wrap ${themeClasses.text}`}>
+                                    {turn.text}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </details>
                       </div>
                     )}
                   </>
