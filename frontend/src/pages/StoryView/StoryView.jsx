@@ -6,29 +6,36 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useGameState } from '../../hooks/useGameAPI'
 
 const StoryView = () => {
   const { id } = useParams()
   const navigate = useNavigate()
   const themeClasses = useThemeClasses()
+  
+  const { data: gameData, isLoading, error } = useGameState(id, {
+    enabled: !!id,
+  })
 
-  // Mock story data - in real app, fetch by id
-  const story = {
-    title: 'The Enchanted Forest',
-    content: `
-      <p>Once upon a time, in a forest where the trees whispered secrets to those who would listen, there lived a young explorer named Luna. She had always been drawn to the mysterious, and this forest was the most mysterious place she had ever encountered.</p>
-      
-      <p>The trees here were ancient, their bark covered in glowing runes that pulsed with a soft purple light. As Luna ventured deeper, she noticed that the whispers were growing louder, more urgent. They were trying to tell her something important.</p>
-      
-      <p>Suddenly, a door appeared before her—a door that shouldn't exist, floating in the middle of a clearing. It was made of what looked like starlight and shadow, and it glowed with an otherworldly light that made her heart race with both fear and excitement.</p>
-      
-      <p>Without hesitation, Luna reached for the handle. The moment her fingers touched the cool, ethereal surface, the entire forest fell silent. The door swung open, revealing not another part of the forest, but a world of pure imagination—a place where stories came to life.</p>
-    `,
-    mode: 'Multiplayer',
-    players: ['Luna', 'Alex', 'Sam', 'Jordan'],
-    date: '2024-01-15',
-    score: 850,
-  }
+  const game = gameData?.game
+  const gameInfo = gameData?.info
+  
+  // Build story content from game data
+  const storyTitle = game?.initialPrompt || 'Untitled Story'
+  const players = game?.players?.map(p => p.name) || []
+  const createdAt = game?.createdAt ? new Date(game.createdAt).toLocaleDateString() : 'Unknown'
+  const scores = game?.scores
+  const playerScores = scores?.players || {}
+  
+  // Calculate total score (average of all player scores)
+  const totalScore = Object.values(playerScores).reduce((sum, score) => {
+    const creativity = Number(score?.creativity) || 0
+    const cohesion = Number(score?.cohesion) || 0
+    const momentum = Number(score?.momentum) || 0
+    return sum + (creativity + cohesion + momentum) / 3
+  }, 0) / Math.max(Object.keys(playerScores).length, 1)
+  
+  const storyContent = game?.summary || game?.scores?.summary || 'Story content will be displayed here once turns are available.'
 
   return (
     <div className={`min-h-screen relative transition-colors ${themeClasses.bg}`}>
@@ -74,56 +81,129 @@ const StoryView = () => {
             <div className="w-24" />
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
+          {isLoading ? (
             <Card className="p-12 max-w-4xl mx-auto">
-              {/* Header */}
-              <div className="text-center mb-8">
-                <h1 className="text-5xl font-header font-bold mb-4 gradient-text">
-                  {story.title}
-                </h1>
-                <div className={`flex items-center justify-center gap-6 ${themeClasses.textSecondary}`}>
-                  <span>📅 {story.date}</span>
-                  <span>👥 {story.players.length} players</span>
-                  <span className="text-sunbeam-yellow font-bold">
-                    ⭐ {story.score} points
-                  </span>
-                </div>
+              <div className="text-center py-8">
+                <div className="text-lg">Loading story...</div>
               </div>
-
-              {/* Story Content */}
-              <div
-                className={`prose max-w-none text-lg leading-relaxed ${
-                  themeClasses.isDark ? 'prose-invert' : ''
-                }`}
-                dangerouslySetInnerHTML={{ __html: story.content }}
-                style={{
-                  color: themeClasses.isDark ? '#D9D9E0' : '#1A1A1E',
-                }}
-              />
-
-              {/* Contributors */}
-              <div className={`mt-12 pt-8 border-t ${themeClasses.border}`}>
-                <h3 className="text-xl font-header font-bold mb-4">
-                  Story Contributors
-                </h3>
-                <div className="flex flex-wrap gap-3">
-                  {story.players.map((player, index) => (
-                    <motion.span
-                      key={player}
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="bg-gradient-purple-mint px-4 py-2 rounded-full font-header font-bold text-sm"
-                    >
-                      {player}
-                    </motion.span>
-                  ))}
-                </div>
+            </Card>
+          ) : error ? (
+            <Card className="p-12 max-w-4xl mx-auto">
+              <div className="text-center py-8">
+                <div className="text-lg text-red-500">Error loading story: {error.message}</div>
+                <Button
+                  variant="primary"
+                  className="mt-4"
+                  onClick={() => navigate('/history')}
+                >
+                  Back to History
+                </Button>
               </div>
+            </Card>
+          ) : !game ? (
+            <Card className="p-12 max-w-4xl mx-auto">
+              <div className="text-center py-8">
+                <div className="text-lg">Story not found</div>
+                <Button
+                  variant="primary"
+                  className="mt-4"
+                  onClick={() => navigate('/history')}
+                >
+                  Back to History
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+            >
+              <Card className="p-12 max-w-4xl mx-auto">
+                {/* Header */}
+                <div className="text-center mb-8">
+                  <h1 className="text-5xl font-header font-bold mb-4 gradient-text">
+                    {storyTitle}
+                  </h1>
+                  <div className={`flex items-center justify-center gap-6 ${themeClasses.textSecondary}`}>
+                    <span>📅 {createdAt}</span>
+                    <span>👥 {players.length} players</span>
+                    {totalScore > 0 && (
+                      <span className="text-sunbeam-yellow font-bold">
+                        ⭐ {Math.round(totalScore)} points
+                      </span>
+                    )}
+                    {game?.status && (
+                      <span className={`px-3 py-1 rounded-full text-sm ${
+                        game.status === 'finished' ? 'bg-green-500 bg-opacity-20 text-green-400' : 'bg-yellow-500 bg-opacity-20 text-yellow-400'
+                      }`}>
+                        {game.status}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Story Content */}
+                <div
+                  className={`prose max-w-none text-lg leading-relaxed ${
+                    themeClasses.isDark ? 'prose-invert' : ''
+                  }`}
+                  style={{
+                    color: themeClasses.isDark ? '#D9D9E0' : '#1A1A1E',
+                  }}
+                >
+                  <p className="whitespace-pre-wrap">{storyContent}</p>
+                </div>
+
+                {/* Scores Section */}
+                {scores && Object.keys(playerScores).length > 0 && (
+                  <div className={`mt-12 pt-8 border-t ${themeClasses.border}`}>
+                    <h3 className="text-xl font-header font-bold mb-4">
+                      Scores
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {Object.entries(playerScores).map(([playerName, score]) => {
+                        const creativity = Number(score?.creativity) || 0
+                        const cohesion = Number(score?.cohesion) || 0
+                        const momentum = Number(score?.momentum) || 0
+                        const avg = (creativity + cohesion + momentum) / 3
+                        return (
+                          <div key={playerName} className={`p-4 rounded-lg ${themeClasses.card}`}>
+                            <div className="font-bold mb-2">{playerName}</div>
+                            <div className="text-sm space-y-1">
+                              <div>Creativity: {creativity.toFixed(1)}</div>
+                              <div>Cohesion: {cohesion.toFixed(1)}</div>
+                              <div>Momentum: {momentum.toFixed(1)}</div>
+                              <div className="font-bold text-mint-pop mt-2">Average: {avg.toFixed(1)}</div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Contributors */}
+                {players.length > 0 && (
+                  <div className={`mt-12 pt-8 border-t ${themeClasses.border}`}>
+                    <h3 className="text-xl font-header font-bold mb-4">
+                      Story Contributors
+                    </h3>
+                    <div className="flex flex-wrap gap-3">
+                      {players.map((player, index) => (
+                        <motion.span
+                          key={player}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.1 }}
+                          className="bg-gradient-purple-mint px-4 py-2 rounded-full font-header font-bold text-sm"
+                        >
+                          {player}
+                        </motion.span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               {/* Actions */}
               <div className="mt-8 flex gap-4 justify-center">
