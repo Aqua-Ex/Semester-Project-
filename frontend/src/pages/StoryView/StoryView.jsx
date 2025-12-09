@@ -226,6 +226,7 @@ const StoryView = () => {
               </div>
             </Card>
           </motion.div>
+          )}
         </div>
       </Container>
     </div>
