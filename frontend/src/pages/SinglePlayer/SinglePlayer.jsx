@@ -25,20 +25,26 @@ const SinglePlayer = () => {
   const gameId = searchParams.get('gameId')
   const createGameMutation = useCreateGame()
   const submitTurnMutation = useSubmitTurn()
-  const { data: gameData, isLoading } = useGameState(gameId, {
+  const { data: gameData, isLoading, error: gameError } = useGameState(gameId, {
     enabled: !!gameId,
-    refetchInterval: gameData?.game?.status === 'active' ? 2000 : false,
+    refetchInterval: (query) => {
+      const game = query?.state?.data?.game
+      return game && game.status === 'active' ? 2000 : false
+    },
   })
 
   const game = gameData?.game
   const gameInfo = gameData?.info
   const currentPrompt = game?.initialPrompt || game?.guidePrompt || 'You wake up in a world where gravity works sideways.'
-  const isMyTurn = game?.currentPlayerId === user.id
+  const isMyTurn = game?.currentPlayerId === user?.id
   const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  
+  // Show loading state while creating game
+  const isCreatingGame = !gameId && !game && createGameMutation.isPending
 
   // Create game on mount if no gameId
   useEffect(() => {
-    if (!gameId && user.id && !createGameMutation.isPending) {
+    if (!gameId && user?.id && !createGameMutation.isPending && !createGameMutation.isSuccess) {
       createGameMutation.mutate({
         hostName: user.username || 'Player',
         hostId: user.id,
@@ -64,11 +70,12 @@ const SinglePlayer = () => {
         },
         onError: (error) => {
           console.error('Failed to create game:', error)
-          alert('Failed to create game. Please try again.')
+          alert(`Failed to create game: ${error.message || 'Please try again.'}`)
         },
       })
     }
-  }, [gameId, user.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId, user?.id])
 
   // Update match context when game state changes
   useEffect(() => {
@@ -80,6 +87,7 @@ const SinglePlayer = () => {
         status: game.status,
       })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
   const handleSubmitTurn = () => {
@@ -155,36 +163,59 @@ const SinglePlayer = () => {
             <div className="w-24" />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {/* Left: Prompt */}
-            <div className="lg:col-span-1">
-              <PromptCard
-                prompt={currentPrompt}
-                category="chaos"
-              />
-            </div>
-
-            {/* Center: Story Editor */}
-            <div className="lg:col-span-2">
-              <Card className="p-6">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
-                    {isMyTurn ? 'Your Turn' : "StoryBot's Turn"}
-                  </h3>
-                  {timeRemaining > 0 && (
-                    <Timer
-                      initialTime={300}
-                      timeRemaining={timeRemaining}
-                      size={80}
-                    />
-                  )}
+          {createGameMutation.isError ? (
+            <Card className="p-12 max-w-2xl mx-auto">
+              <div className="text-center py-8">
+                <div className="text-lg text-red-500 mb-4">Error creating game</div>
+                <div className="text-sm opacity-70 mb-4">
+                  {createGameMutation.error?.message || 'Failed to create game'}
                 </div>
-                
-                {isLoading ? (
-                  <div className="text-center py-8">
-                    <div className="text-lg">Loading game...</div>
+                <Button
+                  variant="primary"
+                  onClick={() => window.location.reload()}
+                >
+                  Retry
+                </Button>
+              </div>
+            </Card>
+          ) : isCreatingGame ? (
+            <Card className="p-12 max-w-2xl mx-auto">
+              <div className="text-center py-8">
+                <div className="text-lg mb-4">Creating your game...</div>
+                <div className="text-sm opacity-70">Please wait</div>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+              {/* Left: Prompt */}
+              <div className="lg:col-span-1">
+                <PromptCard
+                  prompt={currentPrompt}
+                  category="chaos"
+                />
+              </div>
+
+              {/* Center: Story Editor */}
+              <div className="lg:col-span-2">
+                <Card className="p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
+                      {isMyTurn ? 'Your Turn' : "StoryBot's Turn"}
+                    </h3>
+                    {timeRemaining > 0 && (
+                      <Timer
+                        initialTime={300}
+                        timeRemaining={timeRemaining}
+                        size={80}
+                      />
+                    )}
                   </div>
-                ) : (
+                  
+                  {isLoading ? (
+                    <div className="text-center py-8">
+                      <div className="text-lg">Loading game...</div>
+                    </div>
+                  ) : (
                   <>
                     <StoryEditor
                       content={story}
@@ -217,10 +248,11 @@ const SinglePlayer = () => {
                       </div>
                     )}
                   </>
-                )}
-              </Card>
+                  )}
+                </Card>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </Container>
     </div>
