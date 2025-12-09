@@ -275,12 +275,12 @@ const Lobby = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            navigator.clipboard.writeText(`${window.location.origin}/lobby?gameId=${gameId}`)
-                            alert('Game link copied to clipboard!')
+                            navigator.clipboard.writeText(gameId)
+                            alert('Game code copied to clipboard!')
                           }}
                           className="text-xs"
                         >
-                          📋 Copy Link
+                          📋 Copy Code
                         </Button>
                       </div>
                       <div className="text-xs mt-2 opacity-60">
