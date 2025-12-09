@@ -30,10 +30,84 @@ const makeCollection = (db, path) => {
       ref.set(data);
       return ref;
     },
+    where: (field, op, value) => {
+      let filteredDocs = Array.from(col._docs.entries())
+        .filter(([id, data]) => {
+          if (op === '==') return data[field] === value;
+          if (op === '>=') return data[field] >= value;
+          if (op === '<=') return data[field] <= value;
+          if (op === '>') return data[field] > value;
+          if (op === '<') return data[field] < value;
+          return false;
+        });
+      
+      return {
+        orderBy: (field2, direction = 'asc') => ({
+          limit: (count) => ({
+            get: async () => {
+              const sorted = filteredDocs
+                .map(([id, data]) => {
+                  const ref = makeDocRef(col, id);
+                  return { id, data: () => data, ref };
+                })
+                .sort((a, b) => {
+                  const av = a.data()[field2];
+                  const bv = b.data()[field2];
+                  if (av === bv) return 0;
+                  return direction === 'desc' ? (av > bv ? -1 : 1) : av > bv ? 1 : -1;
+                })
+                .slice(0, count);
+              return { docs: sorted };
+            },
+          }),
+          get: async () => {
+            const sorted = filteredDocs
+              .map(([id, data]) => {
+                const ref = makeDocRef(col, id);
+                return { id, data: () => data, ref };
+              })
+              .sort((a, b) => {
+                const av = a.data()[field2];
+                const bv = b.data()[field2];
+                if (av === bv) return 0;
+                return direction === 'desc' ? (av > bv ? -1 : 1) : av > bv ? 1 : -1;
+              });
+            return { docs: sorted };
+          },
+        }),
+        get: async () => {
+          const docs = filteredDocs.map(([id, data]) => {
+            const ref = makeDocRef(col, id);
+            return { id, data: () => data, ref };
+          });
+          return { docs };
+        },
+      };
+    },
     orderBy: (field, direction = 'asc') => ({
+      limit: (count) => ({
+        get: async () => {
+          const docs = Array.from(col._docs.entries())
+            .map(([id, data]) => {
+              const ref = makeDocRef(col, id);
+              return { id, data: () => data, ref };
+            })
+            .sort((a, b) => {
+              const av = a.data()[field];
+              const bv = b.data()[field];
+              if (av === bv) return 0;
+              return direction === 'desc' ? (av > bv ? -1 : 1) : av > bv ? 1 : -1;
+            })
+            .slice(0, count);
+          return { docs };
+        },
+      }),
       get: async () => {
         const docs = Array.from(col._docs.entries())
-          .map(([id, data]) => ({ id, data: () => data }))
+          .map(([id, data]) => {
+            const ref = makeDocRef(col, id);
+            return { id, data: () => data, ref };
+          })
           .sort((a, b) => {
             const av = a.data()[field];
             const bv = b.data()[field];
@@ -44,7 +118,10 @@ const makeCollection = (db, path) => {
       },
     }),
     get: async () => {
-      const docs = Array.from(col._docs.entries()).map(([id, data]) => ({ id, data: () => data }));
+      const docs = Array.from(col._docs.entries()).map(([id, data]) => {
+        const ref = makeDocRef(col, id);
+        return { id, data: () => data, ref };
+      });
       return { docs };
     },
     listDocuments: async () => Array.from(col._docs.keys()).map((id) => makeDocRef(col, id)),
