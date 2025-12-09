@@ -126,3 +126,59 @@ export const useStartGame = () => {
   });
 };
 
+/**
+ * Hook to fetch leaderboard
+ */
+export const useLeaderboard = (type, userId = null, options = {}) => {
+  const { enabled = true } = options;
+  return useQuery({
+    queryKey: ['leaderboard', type, userId],
+    queryFn: () => gameAPI.getLeaderboard(type, userId),
+    enabled: enabled,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+};
+
+/**
+ * Hook to fetch user's game history
+ */
+export const useUserHistory = (userId, options = {}) => {
+  const { enabled = true } = options;
+  return useQuery({
+    queryKey: ['history', userId],
+    queryFn: () => gameAPI.getUserHistory(userId),
+    enabled: enabled && !!userId,
+    staleTime: 60000, // Cache for 1 minute
+  });
+};
+
+/**
+ * Hook to fetch chat messages
+ */
+export const useChatMessages = (gameId, options = {}) => {
+  const { enabled = true, refetchInterval = null } = options;
+  return useQuery({
+    queryKey: ['chat', gameId],
+    queryFn: () => gameAPI.getChatMessages(gameId),
+    enabled: enabled && !!gameId,
+    refetchInterval: refetchInterval || false,
+    staleTime: 1000, // Consider stale after 1 second
+  });
+};
+
+/**
+ * Hook to send a chat message
+ */
+export const useSendChatMessage = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, messageData }) => gameAPI.sendChatMessage(gameId, messageData),
+    onSuccess: (data, variables) => {
+      // Invalidate and refetch chat messages
+      queryClient.invalidateQueries({ queryKey: ['chat', variables.gameId] });
+      queryClient.refetchQueries({ queryKey: ['chat', variables.gameId] });
+    },
+  });
+};
+

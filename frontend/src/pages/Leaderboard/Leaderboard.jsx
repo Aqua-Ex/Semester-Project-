@@ -8,10 +8,13 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useLeaderboard } from '../../hooks/useGameAPI'
+import { useUser } from '../../context/UserContext'
 
 const Leaderboard = () => {
   const navigate = useNavigate()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
   const [activeTab, setActiveTab] = useState('global')
 
   const tabs = [
@@ -21,32 +24,12 @@ const Leaderboard = () => {
     { id: 'rapidfire', label: 'RapidFire', icon: '⚡' },
   ]
 
-  const leaderboardData = {
-    global: [
-      { rank: 1, username: 'StoryMaster', score: 12500, avatar: null },
-      { rank: 2, username: 'WordWizard', score: 11800, avatar: null },
-      { rank: 3, username: 'NarrativeNinja', score: 11200, avatar: null },
-      { rank: 4, username: 'TaleTeller', score: 10800, avatar: null },
-      { rank: 5, username: 'You', score: 9500, avatar: null },
-    ],
-    friends: [
-      { rank: 1, username: 'Friend1', score: 8500, avatar: null },
-      { rank: 2, username: 'You', score: 8200, avatar: null },
-      { rank: 3, username: 'Friend2', score: 7800, avatar: null },
-    ],
-    weekly: [
-      { rank: 1, username: 'WeeklyWinner', score: 3200, avatar: null },
-      { rank: 2, username: 'You', score: 2800, avatar: null },
-      { rank: 3, username: 'Competitor', score: 2500, avatar: null },
-    ],
-    rapidfire: [
-      { rank: 1, username: 'SpeedWriter', score: 15000, avatar: null },
-      { rank: 2, username: 'FastFingers', score: 14200, avatar: null },
-      { rank: 3, username: 'You', score: 13800, avatar: null },
-    ],
-  }
+  const { data: leaderboardData, isLoading } = useLeaderboard(
+    activeTab,
+    activeTab === 'friends' ? user.id : null
+  )
 
-  const currentData = leaderboardData[activeTab] || []
+  const currentData = leaderboardData?.entries || []
 
   const getRankIcon = (rank) => {
     if (rank === 1) return '🥇'
@@ -121,39 +104,52 @@ const Leaderboard = () => {
 
           {/* Leaderboard */}
           <Card className="p-8">
-            <div className="space-y-4">
-              {currentData.map((entry, index) => (
-                <motion.div
-                  key={entry.rank}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  className={`
-                    flex items-center gap-6 p-6 rounded-lg
-                    ${entry.username === 'You' 
-                      ? 'bg-gradient-purple-mint bg-opacity-20 border-2 border-mint-pop' 
-                      : themeClasses.card
-                    }
-                  `}
-                >
-                  <div className="text-3xl font-header font-bold w-16 text-center">
-                    {getRankIcon(entry.rank)}
-                  </div>
-                  <Avatar user={entry} size="md" />
-                  <div className="flex-1">
-                    <div className={`text-xl font-header font-bold ${themeClasses.text}`}>
-                      {entry.username}
-                      {entry.username === 'You' && (
-                        <span className="ml-2 text-sm text-mint-pop">(You)</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-2xl font-decorative font-bold text-sunbeam-yellow">
-                    {entry.score.toLocaleString()}
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            {isLoading ? (
+              <div className="text-center py-8">
+                <div className="text-lg">Loading leaderboard...</div>
+              </div>
+            ) : currentData.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-lg opacity-70">No leaderboard data available yet</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {currentData.map((entry, index) => {
+                  const isCurrentUser = entry.userId === user.id;
+                  return (
+                    <motion.div
+                      key={entry.rank || index}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className={`
+                        flex items-center gap-6 p-6 rounded-lg
+                        ${isCurrentUser
+                          ? 'bg-gradient-purple-mint bg-opacity-20 border-2 border-mint-pop'
+                          : themeClasses.card
+                        }
+                      `}
+                    >
+                      <div className="text-3xl font-header font-bold w-16 text-center">
+                        {getRankIcon(entry.rank)}
+                      </div>
+                      <Avatar user={entry} size="md" />
+                      <div className="flex-1">
+                        <div className={`text-xl font-header font-bold ${themeClasses.text}`}>
+                          {entry.username}
+                          {isCurrentUser && (
+                            <span className="ml-2 text-sm text-mint-pop">(You)</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-2xl font-decorative font-bold text-sunbeam-yellow">
+                        {entry.score.toLocaleString()}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         </div>
       </Container>

@@ -6,43 +6,16 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useUserHistory } from '../../hooks/useGameAPI'
+import { useUser } from '../../context/UserContext'
 
 const History = () => {
   const navigate = useNavigate()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
 
-  const historyItems = [
-    {
-      id: '1',
-      mode: 'Multiplayer',
-      title: 'The Enchanted Forest',
-      players: 4,
-      date: '2024-01-15',
-      score: 850,
-      result: 'win',
-      preview: 'Once upon a time, in a forest where the trees whispered secrets...',
-    },
-    {
-      id: '2',
-      mode: 'RapidFire',
-      title: 'Space Adventure',
-      players: 1,
-      date: '2024-01-14',
-      score: 1200,
-      result: 'win',
-      preview: 'The spaceship hurtled through the asteroid field...',
-    },
-    {
-      id: '3',
-      mode: 'Single Player',
-      title: 'Mystery Mansion',
-      players: 1,
-      date: '2024-01-13',
-      score: 650,
-      result: 'loss',
-      preview: 'The old mansion creaked in the wind...',
-    },
-  ]
+  const { data: historyData, isLoading } = useUserHistory(user.id)
+  const historyItems = historyData?.history || []
 
   const getModeIcon = (mode) => {
     if (mode === 'Multiplayer') return '👥'
@@ -103,53 +76,66 @@ const History = () => {
             <div className="w-24" />
           </div>
 
-          <div className="space-y-4">
-            {historyItems.map((item, index) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <Card className="p-6 hover:scale-[1.02] transition-transform">
-                  <div className="flex items-start gap-6">
-                    <div className="text-4xl">
-                      {getModeIcon(item.mode)}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-4 mb-2">
-                        <h3 className="text-2xl font-header font-bold">
-                          {item.title}
-                        </h3>
-                        <span className="text-sm text-cloud-gray">
-                          {getResultIcon(item.result)}
-                        </span>
-                        <span className="text-sm bg-soft-charcoal px-3 py-1 rounded-full">
-                          {item.mode}
-                        </span>
+          {isLoading ? (
+            <div className="text-center py-8">
+              <div className="text-lg">Loading history...</div>
+            </div>
+          ) : historyItems.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-lg opacity-70">No game history yet. Start playing to see your stories here!</div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {historyItems.map((item, index) => {
+                const date = item.date ? new Date(item.date).toLocaleDateString() : 'Unknown date';
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <Card className="p-6 hover:scale-[1.02] transition-transform">
+                      <div className="flex items-start gap-6">
+                        <div className="text-4xl">
+                          {getModeIcon(item.mode)}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-4 mb-2">
+                            <h3 className="text-2xl font-header font-bold">
+                              {item.title}
+                            </h3>
+                            <span className="text-sm text-cloud-gray">
+                              {getResultIcon(item.result)}
+                            </span>
+                            <span className="text-sm bg-soft-charcoal px-3 py-1 rounded-full">
+                              {item.mode}
+                            </span>
+                          </div>
+                          <p className={`mb-4 line-clamp-2 ${themeClasses.textSecondary}`}>
+                            {item.preview}
+                          </p>
+                          <div className={`flex items-center gap-6 text-sm ${themeClasses.textSecondary}`}>
+                            <span>📅 {date}</span>
+                            <span>👥 {item.players} players</span>
+                            <span className="text-sunbeam-yellow font-bold">
+                              ⭐ {item.score} points
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          onClick={() => navigate(`/story/${item.id}`)}
+                        >
+                          View Story
+                        </Button>
                       </div>
-                      <p className={`mb-4 line-clamp-2 ${themeClasses.textSecondary}`}>
-                        {item.preview}
-                      </p>
-                      <div className={`flex items-center gap-6 text-sm ${themeClasses.textSecondary}`}>
-                        <span>📅 {item.date}</span>
-                        <span>👥 {item.players} players</span>
-                        <span className="text-sunbeam-yellow font-bold">
-                          ⭐ {item.score} points
-                        </span>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      onClick={() => navigate(`/story/${item.id}`)}
-                    >
-                      View Story
-                    </Button>
-                  </div>
-                </Card>
-              </motion.div>
-            ))}
-          </div>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </Container>
     </div>

@@ -123,6 +123,57 @@ export const gameAPI = {
       method: 'POST',
     });
   },
+
+  /**
+   * Get leaderboard data
+   * @param {string} type - 'global', 'weekly', 'friends', 'rapidfire'
+   * @param {string} userId - Optional user ID for friends leaderboard
+   * @returns {Promise<Object>} Leaderboard entries
+   */
+  getLeaderboard: async (type, userId = null) => {
+    const params = userId ? `?userId=${userId}` : '';
+    return apiRequest(`/api/game/leaderboard/${type}${params}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Get user's game history
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Array of finished games
+   */
+  getUserHistory: async (userId) => {
+    return apiRequest(`/api/game/history/${userId}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Get chat messages for a game
+   * @param {string} gameId - Game ID
+   * @returns {Promise<Object>} Array of chat messages
+   */
+  getChatMessages: async (gameId) => {
+    return apiRequest(`/api/game/${gameId}/chat`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Send a chat message
+   * @param {string} gameId - Game ID
+   * @param {Object} messageData - Message data
+   * @param {string} messageData.playerName - Player name
+   * @param {string} messageData.playerId - Player ID
+   * @param {string} messageData.text - Message text
+   * @returns {Promise<Object>} Created message
+   */
+  sendChatMessage: async (gameId, messageData) => {
+    return apiRequest(`/api/game/${gameId}/chat`, {
+      method: 'POST',
+      body: messageData,
+    });
+  },
 };
 
 /**

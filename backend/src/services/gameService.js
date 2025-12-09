@@ -519,3 +519,179 @@ export const resetGames = async () => {
   batches.push(batch.commit());
   await Promise.all(batches);
 };
+
+/**
+ * Get leaderboard data
+ * @param {string} type - 'global', 'weekly', 'friends', 'rapidfire'
+ * @param {string} userId - Optional user ID for friends leaderboard
+ * @returns {Promise<Object>} Leaderboard entries
+ */
+export const getLeaderboard = async (type = 'global', userId = null) => {
+  try {
+    let query = leaderboardCollection.orderBy('topScore', 'desc').limit(100);
+    
+    if (type === 'weekly') {
+      // Get entries from last 7 days, ordered by lastUpdated then topScore
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      query = leaderboardCollection
+        .where('lastUpdated', '>=', weekAgo.toISOString())
+        .orderBy('lastUpdated', 'desc')
+        .limit(100);
+    }
+    
+    const snap = await query.get();
+    let entries = snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        username: data.username || 'Anonymous',
+        score: Math.round(data.topScore || 0),
+        avatar: null,
+        userId: data.userId,
+        lastUpdated: data.lastUpdated,
+      };
+    });
+    
+    // For weekly, sort by score after fetching (since Firestore doesn't support multiple orderBy)
+    if (type === 'weekly') {
+      entries = entries.sort((a, b) => b.score - a.score);
+    }
+    
+    // Add rank after sorting
+    entries = entries.map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
+    
+    return { entries };
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    return { error: 'Failed to fetch leaderboard', status: 500 };
+  }
+};
+
+/**
+ * Get user's game history
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Array of finished games
+ */
+export const getUserHistory = async (userId) => {
+  try {
+    if (!userId) {
+      return { error: 'User ID is required', status: 400 };
+    }
+    
+    // Get all finished games where user participated
+    const gamesSnap = await gamesCollection
+      .where('status', '==', 'finished')
+      .orderBy('updatedAt', 'desc')
+      .limit(50)
+      .get();
+    
+    const history = [];
+    for (const doc of gamesSnap.docs) {
+      const game = doc.data();
+      const playerIds = (game.players || []).map(p => p.id);
+      
+      // Check if user participated in this game
+      if (playerIds.includes(userId)) {
+        const playerScores = game.scores?.players || {};
+        const userScore = Object.values(playerScores).find(
+          (score) => score.playerId === userId
+        ) || { total: 0 };
+        
+        // Get first turn for preview
+        const turnsSnap = await doc.ref.collection('turns')
+          .orderBy('order', 'asc')
+          .limit(1)
+          .get();
+        const firstTurn = turnsSnap.docs[0]?.data();
+        
+        history.push({
+          id: doc.id,
+          mode: game.mode === 'single' ? 'Single Player' : 'Multiplayer',
+          title: game.initialPrompt || 'Untitled Story',
+          players: (game.players || []).length,
+          date: game.updatedAt || game.createdAt,
+          score: Math.round(userScore.total || 0),
+          result: userScore.total > 0 ? 'win' : 'loss',
+          preview: firstTurn?.text?.substring(0, 100) || 'Story preview...',
+        });
+      }
+    }
+    
+    return { history };
+  } catch (error) {
+    console.error('Error fetching user history:', error);
+    return { error: 'Failed to fetch history', status: 500 };
+  }
+};
+
+/**
+ * Get chat messages for a game
+ * @param {string} gameId - Game ID
+ * @returns {Promise<Object>} Array of chat messages
+ */
+export const getChatMessages = async (gameId) => {
+  try {
+    const gameRef = gamesCollection.doc(gameId);
+    const gameSnap = await gameRef.get();
+    
+    if (!gameSnap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+    
+    const messagesSnap = await gameRef.collection('messages')
+      .orderBy('createdAt', 'asc')
+      .get();
+    
+    const messages = messagesSnap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    
+    return { messages };
+  } catch (error) {
+    console.error('Error fetching chat messages:', error);
+    return { error: 'Failed to fetch messages', status: 500 };
+  }
+};
+
+/**
+ * Send a chat message
+ * @param {string} gameId - Game ID
+ * @param {Object} messageData - Message data
+ * @param {string} messageData.playerName - Player name
+ * @param {string} messageData.playerId - Player ID
+ * @param {string} messageData.text - Message text
+ * @returns {Promise<Object>} Created message
+ */
+export const sendChatMessage = async (gameId, { playerName, playerId, text }) => {
+  try {
+    const gameRef = gamesCollection.doc(gameId);
+    const gameSnap = await gameRef.get();
+    
+    if (!gameSnap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+    
+    const message = {
+      playerName: playerName?.trim() || 'Anonymous',
+      playerId,
+      text: text?.trim() || '',
+      createdAt: nowIso(),
+    };
+    
+    if (!message.text) {
+      return { error: 'Message text is required', status: 400 };
+    }
+    
+    const messageRef = await gameRef.collection('messages').add(message);
+    const messageData = { id: messageRef.id, ...message };
+    
+    return { message: messageData };
+  } catch (error) {
+    console.error('Error sending chat message:', error);
+    return { error: 'Failed to send message', status: 500 };
+  }
+};

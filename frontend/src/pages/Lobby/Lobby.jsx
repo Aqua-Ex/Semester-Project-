@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useJoinGame, useGameState, useStartGame } from '../../hooks/useGameAPI'
+import { useCreateGame, useJoinGame, useGameState, useStartGame, useChatMessages, useSendChatMessage } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 
@@ -36,6 +36,14 @@ const Lobby = () => {
     refetchInterval: 2000, // Poll every 2 seconds
     pollWaiting: true, // Poll even when game is waiting (for lobby)
   })
+  const { data: chatData } = useChatMessages(gameId, {
+    enabled: !!gameId,
+    refetchInterval: 2000, // Poll chat every 2 seconds
+  })
+  const sendChatMutation = useSendChatMessage()
+  const [chatInput, setChatInput] = useState('')
+  
+  const messages = chatData?.messages || []
 
   const game = gameData?.game
   const gameInfo = gameData?.info
@@ -112,6 +120,28 @@ const Lobby = () => {
         },
       })
     }
+  }
+
+  const handleSendMessage = (e) => {
+    e.preventDefault()
+    if (!chatInput.trim() || !gameId || sendChatMutation.isPending) return
+
+    sendChatMutation.mutate({
+      gameId,
+      messageData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: chatInput.trim(),
+      },
+    }, {
+      onSuccess: () => {
+        setChatInput('')
+      },
+      onError: (error) => {
+        console.error('Failed to send message:', error)
+        alert('Failed to send message. Please try again.')
+      },
+    })
   }
 
   const isLoading = isLoadingGame || createGameMutation.isPending || joinGameMutation.isPending
@@ -336,36 +366,57 @@ const Lobby = () => {
                   Chat
                 </h3>
                 <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                  <div className={`p-3 rounded-lg ${
-                    isDark ? 'bg-soft-charcoal' : 'bg-light-card'
-                  }`}>
-                    <span className="text-mint-pop font-bold">Player1:</span>
-                    <span className={`ml-2 ${
-                      isDark ? 'text-cloud-gray' : 'text-light-text-secondary'
-                    }`}>
-                      Let's make this epic!
-                    </span>
-                  </div>
-                  <div className={`p-3 rounded-lg ${
-                    isDark ? 'bg-soft-charcoal' : 'bg-light-card'
-                  }`}>
-                    <span className="text-sunbeam-yellow font-bold">Player2:</span>
-                    <span className={`ml-2 ${
-                      isDark ? 'text-cloud-gray' : 'text-light-text-secondary'
-                    }`}>
-                      Ready when you are!
-                    </span>
-                  </div>
+                  {messages.length === 0 ? (
+                    <div className={`text-sm text-center py-4 ${themeClasses.textSecondary}`}>
+                      No messages yet. Start the conversation!
+                    </div>
+                  ) : (
+                    messages.map((message) => {
+                      const isCurrentUser = message.playerId === user.id
+                      return (
+                        <div
+                          key={message.id}
+                          className={`p-3 rounded-lg ${
+                            isDark ? 'bg-soft-charcoal' : 'bg-light-card'
+                          }`}
+                        >
+                          <span className={`font-bold ${
+                            isCurrentUser ? 'text-mint-pop' : 'text-sunbeam-yellow'
+                          }`}>
+                            {message.playerName}:
+                          </span>
+                          <span className={`ml-2 ${
+                            isDark ? 'text-cloud-gray' : 'text-light-text-secondary'
+                          }`}>
+                            {message.text}
+                          </span>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
-                <input
-                  type="text"
-                  placeholder="Type a message..."
-                  className={`w-full rounded-lg px-4 py-2 focus:outline-none focus:border-mint-pop ${
-                    isDark 
-                      ? 'bg-deep-graphite border border-soft-charcoal text-white' 
-                      : 'bg-light-card border border-gray-200 text-light-text'
-                  }`}
-                />
+                <form onSubmit={handleSendMessage} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    disabled={!gameId || sendChatMutation.isPending}
+                    className={`flex-1 rounded-lg px-4 py-2 focus:outline-none focus:border-mint-pop ${
+                      isDark 
+                        ? 'bg-deep-graphite border border-soft-charcoal text-white' 
+                        : 'bg-light-card border border-gray-200 text-light-text'
+                    }`}
+                  />
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!chatInput.trim() || !gameId || sendChatMutation.isPending}
+                  >
+                    Send
+                  </Button>
+                </form>
               </Card>
 
               {/* Max Players Setting */}
