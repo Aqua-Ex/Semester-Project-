@@ -32,10 +32,10 @@ const SinglePlayer = () => {
   const previewTurnMutation = usePreviewTurn()
   const { data: gameData, isLoading } = useGameState(gameId, {
     enabled: !!gameId,
-    // Use the query's latest data instead of the not-yet-defined gameData variable
+    // Poll frequently any time the game is active (including during AI turns)
     refetchInterval: (query) => {
       const status = query?.state?.data?.game?.status
-      return status === 'active' ? 2000 : false
+      return status === 'active' ? 1500 : false
     },
   })
 

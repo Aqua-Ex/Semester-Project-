@@ -109,8 +109,14 @@ export const gameAPI = {
    * @param {string} gameId - Game ID
    * @returns {Promise<Object>} Game state and info
    */
-  getGameState: async (gameId) => {
-    return apiRequest(`/api/game/${gameId}`, {
+  getGameState: async (gameId, opts = {}) => {
+    const search = new URLSearchParams();
+    if (opts.includeTurns) {
+      search.set('includeTurns', 'true');
+    }
+    const query = search.toString();
+    const url = query ? `/api/game/${gameId}?${query}` : `/api/game/${gameId}`;
+    return apiRequest(url, {
       method: 'GET',
     });
   },

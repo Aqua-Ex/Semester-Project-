@@ -74,7 +74,8 @@ export const previewTurn = async (req, res) => {
 
 export const getGameState = async (req, res) => {
     const {gameId} = req.params;
-    const result = await getGameStateService(gameId);
+    const includeTurns = ['true', '1', 'yes'].includes(String(req.query.includeTurns || '').toLowerCase());
+    const result = await getGameStateService(gameId, {includeTurns});
 
     if (result.error) {
         return res.status(result.status || 404).json({error: result.error});

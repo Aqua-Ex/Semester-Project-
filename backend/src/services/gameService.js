@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../firebase.js';
-import { generateGuidePrompt, generateInitialPrompt } from './aiService.js';
+import { generateGuidePrompt, generateInitialPrompt, generateAiTurnText } from './aiService.js';
 import { scoreGame } from './scoringService.js';
 
 const gamesCollection = db.collection('games');
@@ -36,6 +36,9 @@ const clamp = (value, min, max, fallback) => {
 
 const nowIso = () => new Date().toISOString();
 
+const AI_PLAYER = { id: 'ai-bot', name: 'AI Opponent' };
+const isAiPlayer = (player) => player?.id === AI_PLAYER.id;
+
 const scrubGameForPlayer = (game) => {
   if (!game) return game;
   const { storySoFar, ...rest } = game;
@@ -67,6 +70,13 @@ const advanceTurnState = (game) => {
     turnDeadline: new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
   };
 };
+
+const shouldTriggerAiTurn = (game) =>
+  game &&
+  game.mode === MODES.SINGLE &&
+  game.status === 'active' &&
+  game.currentPlayerId === AI_PLAYER.id &&
+  (game.players || []).some(isAiPlayer);
 
 const addPlayerToGame = (game, { playerId, playerName }) => {
   const players = game.players || [];
@@ -228,14 +238,14 @@ export const createGame = async ({
     ? RAPID_CONFIG.initialDurationSeconds
     : clamp(turnDurationSeconds, 30, 600, 60);
   const turnsCap = clamp(maxTurns, 1, 50, isRapid ? 50 : 5);
-  const minPlayers = mode === MODES.SINGLE || isRapid ? 1 : 2;
-  const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 1 : 3;
+  const minPlayers = mode === MODES.SINGLE ? 2 : isRapid ? 1 : 2;
+  const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 2 : 3;
   const playerCap = clamp(maxPlayers, minPlayers, 7, defaultCap);
 
   const gameId = randomUUID();
   const createdAt = nowIso();
 
-  const players = [{ id: hostId, name: cleanHost }];
+  const players = isSingle ? [{ id: hostId, name: cleanHost }, AI_PLAYER] : [{ id: hostId, name: cleanHost }];
 
   const gameMode = isRapid ? MODES.RAPID : isSingle ? MODES.SINGLE : MODES.MULTI;
   const initialStatus = isRapid || isSingle ? 'active' : 'waiting';
@@ -586,8 +596,24 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
   if (result?.finished) {
     try {
       scores = await scoreGame(result.game);
-      await gamesCollection.doc(gameId).set({ scores }, { merge: true });
-      result.game.scores = scores;
+      // Add simple total metric for quick display
+      const scoresWithTotals = scores
+        ? {
+            ...scores,
+            players: Object.fromEntries(
+              Object.entries(scores.players || {}).map(([name, metrics]) => {
+                const creativity = Number(metrics?.creativity) || 0;
+                const cohesion = Number(metrics?.cohesion ?? metrics?.continuity) || 0;
+                const promptFit = Number(metrics?.prompt_fit ?? metrics?.promptFit ?? metrics?.momentum) || 0;
+                const total = Math.round((creativity + cohesion + promptFit) / 3);
+                return [name, { ...metrics, total }];
+              }),
+            ),
+          }
+        : null;
+
+      await gamesCollection.doc(gameId).set({ scores: scoresWithTotals }, { merge: true });
+      result.game.scores = scoresWithTotals;
       // Persist last 5 games per player (exclude AI)
       const turnsSnapshot = await gamesCollection
         .doc(gameId)
@@ -614,29 +640,84 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
         playerCount: (result.game.players || []).length,
         turnDurationSeconds: result.game.turnDurationSeconds,
         turns: turnSummaries,
-        scores: scores?.players || null,
+        scores: scoresWithTotals?.players || null,
       };
       const humanPlayers = (result.game.players || []).filter((p) => p.id !== 'ai-bot');
       await Promise.all(
         humanPlayers.map((p) => saveFinishedGameForUser(p.id, { ...summary, playerName: p.name })),
       );
       // Leaderboard update
-      await updateLeaderboard(scores, humanPlayers, summary);
+      await updateLeaderboard(scoresWithTotals || scores, humanPlayers, summary);
     } catch (error) {
       console.warn('[gameService] scoring persistence failed:', error);
     }
   }
 
+  // If we're in a single-player (1v1 vs AI) game and it's now the AI's turn, queue an AI response.
+  if (!result?.finished && shouldTriggerAiTurn(result.game)) {
+    queueAiTurn(gameId);
+  }
+
   return { ...result, scores };
 };
 
-export const getGameState = async (gameId) => {
+const queueAiTurn = (gameId) => {
+  setTimeout(() => {
+    performAiTurn(gameId).catch((err) => console.warn('[gameService] AI turn failed:', err?.message || err));
+  }, 0);
+};
+
+const performAiTurn = async (gameId) => {
+  const snap = await gamesCollection.doc(gameId).get();
+  if (!snap.exists) return;
+
+  const game = snap.data();
+  if (!shouldTriggerAiTurn(game)) return;
+  const startedAt = Date.now();
+
+  // Keep the AI's deadline fresh while it generates text
+  const freshDeadline = new Date(Date.now() + (Math.max(10, game.turnDurationSeconds || 60)) * 1000).toISOString();
+  await gamesCollection.doc(gameId).set({ turnDeadline: freshDeadline, updatedAt: nowIso() }, { merge: true });
+
+  const promptForAi = game.guidePrompt || game.initialPrompt || 'Continue the story.';
+  const storySoFar = game.storySoFar || game.initialPrompt || '';
+  console.log('[gameService] AI turn begin', {
+    gameId,
+    promptLength: (promptForAi || '').length,
+    storyLength: (storySoFar || '').length,
+  });
+  const aiText = await generateAiTurnText({
+    storySoFar,
+    prompt: promptForAi,
+    initialPrompt: game.initialPrompt,
+  });
+
+  await submitTurn(gameId, { playerId: AI_PLAYER.id, playerName: AI_PLAYER.name, text: aiText });
+  console.log('[gameService] AI turn submitted', {
+    gameId,
+    durationMs: Date.now() - startedAt,
+    textLength: (aiText || '').length,
+  });
+};
+
+export const getGameState = async (gameId, { includeTurns = false } = {}) => {
   const snap = await gamesCollection.doc(gameId).get();
   if (!snap.exists) {
     return { error: 'Game not found', status: 404 };
   }
 
   let game = snap.data();
+
+  // Ensure active games always have a running deadline (especially for initial turn)
+  if (game.status === 'active' && (!game.turnDeadline || !Number.isFinite(new Date(game.turnDeadline).getTime()))) {
+    const restoredDeadline = new Date(Date.now() + (game.turnDurationSeconds || 60) * 1000).toISOString();
+    game = {
+      ...game,
+      turnDeadline: restoredDeadline,
+      updatedAt: nowIso(),
+    };
+    await gamesCollection.doc(gameId).set({ turnDeadline: restoredDeadline, updatedAt: game.updatedAt }, { merge: true });
+  }
 
   // Auto-finish rapid games when the timer expires
   if (game.mode === MODES.RAPID && game.status === 'active' && game.turnDeadline) {
@@ -666,6 +747,26 @@ export const getGameState = async (gameId) => {
   const isFull = playerCount >= game.maxPlayers;
 
   const visibleGame = scrubGameForPlayer(game);
+  let turns = [];
+  let storyText = null;
+
+  if (includeTurns) {
+    const turnsSnap = await gamesCollection.doc(gameId).collection('turns').orderBy('order', 'asc').get();
+    turns = turnsSnap.docs.map((d) => {
+      const t = d.data();
+      return {
+        order: t.order,
+        playerName: t.playerName,
+        playerId: t.playerId || null,
+        text: t.text,
+        promptUsed: t.promptUsed || t.guidePrompt || null,
+        createdAt: t.createdAt || null,
+      };
+    });
+    const parts = [game.initialPrompt || ''];
+    turns.forEach((t) => parts.push(t.text));
+    storyText = parts.filter(Boolean).join('\n');
+  }
 
   return {
     game: visibleGame,
@@ -681,6 +782,8 @@ export const getGameState = async (gameId) => {
       isFull,
       scores: game.scores || null,
       lastTurn: game.lastTurn || null,
+      turns: includeTurns ? turns : undefined,
+      storyText: includeTurns ? storyText : undefined,
     },
   };
 };

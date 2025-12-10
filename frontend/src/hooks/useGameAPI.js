@@ -129,14 +129,15 @@ export const useReviewJoinRequest = () => {
  * Automatically polls if game is active
  */
 export const useGameState = (gameId, options = {}) => {
-  const { enabled = true, refetchInterval = null, refetchWhileWaiting = false } = options;
+  const { enabled = true, refetchInterval = null, refetchWhileWaiting = false, includeTurns = false } = options;
 
   return useQuery({
     queryKey: ['game', gameId],
-    queryFn: () => gameAPI.getGameState(gameId),
+    queryFn: () => gameAPI.getGameState(gameId, { includeTurns }),
     enabled: enabled && !!gameId,
     refetchInterval: (query) => {
       // Explicit interval overrides
+      if (typeof refetchInterval === 'function') return refetchInterval(query);
       if (refetchInterval) return refetchInterval;
 
       // Auto-refetch if game is active or if caller wants updates while waiting

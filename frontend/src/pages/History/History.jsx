@@ -17,6 +17,11 @@ const History = () => {
 
   const historyItems = data?.games || []
 
+  const stripHtml = (value) => {
+    if (typeof value !== 'string') return value
+    return value.replace(/<[^>]*>/g, '').trim()
+  }
+
   const getModeIcon = (mode) => {
     if (mode === 'multi' || mode === 'Multiplayer') return '👥'
     if (mode === 'rapid' || mode === 'RapidFire') return '⚡'
@@ -98,9 +103,24 @@ const History = () => {
               {historyItems.map((item, index) => {
                 const modeLabel = item.mode === 'multi' ? 'Multiplayer' : item.mode === 'rapid' ? 'RapidFire' : 'Single Player'
                 const created = item.finishedAt || item.createdAt
-                const preview = item.turns?.[0]?.text || item.summary || 'Story preview unavailable.'
+                const preview = stripHtml(item.turns?.[0]?.text || item.summary) || 'Story preview unavailable.'
                 const players = item.playerCount || Object.keys(item.scores || {}).length || '—'
-                const scoreDisplay = item.scores ? Math.round(Object.values(item.scores).reduce((a, b) => a + (b?.total || 0), 0)) : null
+                const playerScores = item.scores || {}
+                const userKey = item.playerName || user?.username
+                const myScoreEntry = userKey && playerScores[userKey] ? playerScores[userKey] : null
+                const myScore = myScoreEntry
+                  ? Math.round(
+                      myScoreEntry.total ??
+                      (
+                        (Number(myScoreEntry.creativity) || 0) +
+                        (Number(myScoreEntry.cohesion ?? myScoreEntry.continuity) || 0) +
+                        (Number(myScoreEntry.prompt_fit ?? myScoreEntry.promptFit ?? myScoreEntry.momentum) || 0)
+                      ) / 3
+                    )
+                  : null
+                const scoreDisplay = myScore ?? (playerScores
+                  ? Math.round(Object.values(playerScores).reduce((acc, s) => acc + (Number(s?.total) || 0), 0))
+                  : null)
                 const durationMinutes = item.turnDurationSeconds ? Math.round(item.turnDurationSeconds / 60) : null
 
                 return (
@@ -135,11 +155,11 @@ const History = () => {
                           <div className={`flex items-center gap-4 text-sm ${themeClasses.textSecondary} flex-wrap`}>
                             <span>📅 {created ? new Date(created).toLocaleDateString() : 'Unknown date'}</span>
                             <span>👥 {players} players</span>
-                            {scoreDisplay ? (
+                            {scoreDisplay !== null && scoreDisplay !== undefined && (
                               <span className="text-sunbeam-yellow font-bold">
-                                ⭐ {scoreDisplay} total pts
+                                ⭐ {myScore !== null && myScore !== undefined ? `Your score: ${myScore}` : `${scoreDisplay} total pts`}
                               </span>
-                            ) : null}
+                            )}
                           </div>
                         </div>
                         <Button
