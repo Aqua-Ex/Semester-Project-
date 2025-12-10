@@ -69,6 +69,12 @@ const Multiplayer = () => {
     }
   }, [game?.status, gameId, navigate])
 
+  // Clear stale preview when the active player or turn changes
+  useEffect(() => {
+    setPreview('')
+    previewTurnMutation.reset()
+  }, [game?.turnsCount, game?.currentPlayerId])
+
   const handlePreviewTurn = () => {
     if (!gameId || !story.trim() || !isMyTurn) return
 
@@ -86,6 +92,10 @@ const Multiplayer = () => {
         console.error('Failed to preview turn:', error)
         alert(error.message || 'Failed to preview turn. Please try again.')
       },
+      onSettled: () => {
+        // ensure pending state clears even if an error was thrown
+        previewTurnMutation.reset()
+      },
     })
   }
 
@@ -102,6 +112,7 @@ const Multiplayer = () => {
     }, {
       onSuccess: () => {
         setStory('')
+        setPreview('')
       },
       onError: (error) => {
         console.error('Failed to submit turn:', error)

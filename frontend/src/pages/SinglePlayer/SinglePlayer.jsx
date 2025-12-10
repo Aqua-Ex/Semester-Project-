@@ -90,6 +90,12 @@ const SinglePlayer = () => {
     }
   }, [game])
 
+  // Clear stale preview when the turn or player changes
+  useEffect(() => {
+    setPreview('')
+    previewTurnMutation.reset()
+  }, [game?.turnsCount, game?.currentPlayerId])
+
   const handlePreviewTurn = () => {
     if (!gameId || !story.trim() || !isMyTurn) return
 
@@ -109,6 +115,9 @@ const SinglePlayer = () => {
         console.error('Failed to preview turn:', error)
         alert(error.message || 'Failed to preview turn. Please try again.')
       },
+      onSettled: () => {
+        previewTurnMutation.reset()
+      },
     })
   }
 
@@ -125,6 +134,7 @@ const SinglePlayer = () => {
     }, {
       onSuccess: (data) => {
         setStory('')
+        setPreview('')
         if (data?.game?.status === 'finished') {
           navigate(`/story/${gameId}`)
         }
