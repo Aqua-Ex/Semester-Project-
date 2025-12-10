@@ -18,6 +18,28 @@ Built with the "Electric Play" color palette:
 npm install
 ```
 
+### Firebase Authentication Setup
+
+1. Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
+2. Enable Google Authentication:
+   - Go to Authentication > Sign-in method
+   - Enable "Google" as a sign-in provider
+3. Get your Firebase configuration:
+   - Go to Project Settings > General
+   - Scroll down to "Your apps" section
+   - Click on the Web app icon (</>) or add a new web app
+   - Copy the Firebase configuration values
+4. Create a `.env` file in the `frontend` directory with your Firebase config:
+
+```env
+VITE_FIREBASE_API_KEY=your-api-key-here
+VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+VITE_FIREBASE_APP_ID=your-app-id
+```
+
 ### Development Server
 
 ```bash
@@ -71,11 +93,23 @@ src/
 - **Zustand** - State management
 - **React Query** - Data fetching
 
+## 🔐 Authentication
+
+The app uses Firebase Authentication with Google Sign-In. Users must be authenticated to:
+- Access game modes (Multiplayer, Single Player, Rapid Fire)
+- View their story history
+- Access the lobby
+
+Public routes:
+- Home page
+- Leaderboard
+- Login page
+
 ## 🎯 Next Steps
 
 1. Connect to backend API
 2. Implement WebSocket for real-time updates
-3. Add user authentication
+3. ✅ Add user authentication (Completed)
 4. Integrate Firebase for data persistence
 5. Add sound effects and background music
 6. Implement AI Drama Meter
