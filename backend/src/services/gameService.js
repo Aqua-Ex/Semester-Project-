@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../firebase.js';
-import { generateGuidePrompt } from './aiService.js';
+import { generateGuidePrompt, generateInitialPrompt } from './aiService.js';
 import { scoreGame } from './scoringService.js';
 
 const gamesCollection = db.collection('games');
@@ -175,7 +175,10 @@ export const createGame = async ({
   if (!hostId) {
     throw new Error('hostId is required (Google user id)');
   }
-  const prompt = initialPrompt?.trim() || 'A traveler enters a mysterious forest...';
+  const seedPrompt =
+    initialPrompt?.trim() ||
+    'This is a sci-fi story where a captain needs to navigate the galaxy on his spaceship with the help of his trusty crew.';
+  const prompt = await generateInitialPrompt(seedPrompt);
 
   const isRapid = mode === MODES.RAPID;
   const duration = isRapid
@@ -193,21 +196,13 @@ export const createGame = async ({
 
   const gameMode = isRapid ? MODES.RAPID : mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI;
 
-  const initialGuidePrompt = await generateGuidePrompt({
-    storySoFar: prompt,
-    lastTurnText: prompt,
-    previousPrompt: '',
-    turnNumber: 1,
-    initialPrompt: prompt,
-  });
-
   const game = {
     id: gameId,
     hostId,
     hostName: cleanHost,
     status: isRapid ? 'active' : 'waiting',
     initialPrompt: prompt,
-    guidePrompt: initialGuidePrompt,
+    guidePrompt: prompt,
     storySoFar: prompt,
     lastTurn: null,
     players,

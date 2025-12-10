@@ -8,6 +8,7 @@ vi.mock('../src/firebase.js', () => {
 
 vi.mock('../src/services/aiService.js', () => ({
   generateGuidePrompt: vi.fn(async ({ storySoFar, turnNumber }) => `GUIDE-${turnNumber}-${storySoFar || 'EMPTY'}`),
+  generateInitialPrompt: vi.fn(async (seed) => `INIT-${seed || 'DEFAULT'}`),
   callChatModel: vi.fn(),
 }));
 
@@ -44,7 +45,7 @@ describe('gameService', () => {
     });
     expect(game.mode).toBe('single');
     expect(game.players).toHaveLength(1);
-    expect(game.guidePrompt).toContain('GUIDE');
+    expect(game.guidePrompt).toBe('INIT-Start');
     expect(game.currentPlayer).toBe(host.name);
   });
 

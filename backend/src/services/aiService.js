@@ -21,8 +21,8 @@ const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, i
       role: 'system',
       content: [
         'You create challenging constraints for a collaborative storytelling game.',
-        'Read the story context and craft ONE concise, surprising instruction that makes the next continuation harder while staying coherent.',
-        'Force in a bizarre or random element (word/phrase/object/character/condition) that does NOT naturally follow from the story, but can be justified.',
+        'Read the story context and craft ONE concise, surprising instruction that makes the next continuation harder while staying coherent enough to be possible.',
+        'Prioritize bizarreness over smooth continuity: force in a wildly out-of-place element (word/phrase/object/character/condition) that barely fits but can be woven in.',
         'The instruction must start with "Continue the story, but..." and reference concrete details from the context.',
         'Examples of surprise elements: a specific pun, an odd material, an unexpected refusal, a strange rule, a pop-culture reference, or an impossible environment.',
         'Keep it under 28 words. Do not write story text, only the instruction.',
@@ -43,7 +43,7 @@ const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, i
 
 const fallbackPrompt = ({ storySoFar, lastTurnText }) => {
   const base = truncate(lastTurnText || storySoFar || 'the current scene', 160);
-  return `Continue the story, but weave in a bizarre obstacle about ${base} using an odd item or phrase (e.g., rubber ducks or "quantum spaghetti").`;
+  return `Continue the story, but collide ${base} with a wildly out-of-place element (think rubber ducks, quantum spaghetti, a disco anthem, or a sudden vow of silence).`;
 };
 
 const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } = {}) => {
@@ -115,3 +115,39 @@ export const generateGuidePrompt = async ({
 };
 
 export { callChatModel };
+
+const buildInitialPromptMessages = (seed) => {
+  const topic = truncate(seed || 'Invent a fresh, vivid setting with a clear goal and tension.', 200);
+  return [
+    {
+      role: 'system',
+      content: [
+        'You write concise, vivid opening prompts for a collaborative story game.',
+        'Return exactly 1-2 sentences that set the scene and goal, include a hook, and avoid resolving the plot.',
+        'Make it specific and flavorful; avoid generic fantasy tropes; do not add instructions.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: `Create a new story opener based on this seed (optional): ${topic}`,
+    },
+  ];
+};
+
+export const generateInitialPrompt = async (seed) => {
+  const fallback =
+    'This is a sci-fi story where a captain needs to navigate the galaxy on his spaceship with the help of his trusty crew.';
+
+  if (!GROQ_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const messages = buildInitialPromptMessages(seed);
+    const prompt = await callChatModel(messages, { temperature: 0.8, max_tokens: 90 });
+    return prompt || fallback;
+  } catch (error) {
+    console.warn('[aiService] initial prompt generation failed, using fallback:', error);
+    return fallback;
+  }
+};
