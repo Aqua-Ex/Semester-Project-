@@ -14,7 +14,7 @@ Content-Type: application/json
 }
 
 ### Join an existing game (1)
-POST http://localhost:3001/api/game/b69b22a0-1078-4983-ac63-40899122af2b/join
+POST http://localhost:3001/api/game/ebaa3ae5-cd06-4d45-a92b-3d01244a0d09/join
 Content-Type: application/json
 
 {
@@ -32,13 +32,13 @@ Content-Type: application/json
 }
 
 ### Submit a turn (uses ID from createGame)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+POST http://localhost:3001/api/game/d4875d3d-6ccf-4245-ad18-a7a33dc17675/turn
 Content-Type: application/json
 
 {
-  "playerName": "Tester",
-  "playerId": "tester-user-1",
-  "text": "The hero entered the forest, unaware of the danger ahead."
+  "playerName": "Player2",
+  "playerId": "player2-user-1",
+  "text": "The ballet dancers demanded that the crew leave the ship"
 }
 
 ### Submit turn 2 (Player2)

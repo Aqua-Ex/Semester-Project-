@@ -39,10 +39,10 @@ const PromptCard = ({ prompt, category, className = '' }) => {
           <div className="flex items-start gap-4">
             <div className="text-4xl">{icon}</div>
             <div className="flex-1">
-              <div className="text-sm font-decorative text-cloud-gray mb-2 uppercase tracking-wider">
+              <div className="text-sm font-decorative text-slate-600 dark:text-cloud-gray mb-2 uppercase tracking-wider">
                 {category || 'Prompt'}
               </div>
-              <div className="text-xl font-header font-bold text-white leading-relaxed">
+              <div className="text-xl font-header font-bold text-slate-900 dark:text-white leading-relaxed">
                 {prompt || 'Waiting for prompt...'}
               </div>
             </div>
@@ -54,4 +54,3 @@ const PromptCard = ({ prompt, category, className = '' }) => {
 }
 
 export default PromptCard
-
