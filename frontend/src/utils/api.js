@@ -92,6 +92,19 @@ export const gameAPI = {
   },
 
   /**
+   * Preview a turn without committing it
+   * @param {string} gameId - Game ID
+   * @param {Object} turnData - Turn text and player info
+   * @returns {Promise<Object>} Preview response from AI
+   */
+  previewTurn: async (gameId, turnData) => {
+    return apiRequest(`/api/game/${gameId}/preview`, {
+      method: 'POST',
+      body: turnData,
+    });
+  },
+
+  /**
    * Get current game state
    * @param {string} gameId - Game ID
    * @returns {Promise<Object>} Game state and info

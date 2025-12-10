@@ -4,6 +4,7 @@ import {
     getGameState as getGameStateService,
     joinGame as joinGameService,
     startGame as startGameService,
+    previewTurn as previewTurnService,
 } from '../services/gameService.js';
 import {log} from '../tools/logger.js';
 
@@ -27,6 +28,20 @@ export const submitTurn = async (req, res) => {
 
     log(`Turn ${result.turn.order} submitted to game ${gameId} by ${result.turn.playerName}`);
     res.json({game: result.game, turn: result.turn, scores: result.scores});
+};
+
+export const previewTurn = async (req, res) => {
+    const {gameId} = req.params;
+    const {playerName, playerId, text} = req.body || {};
+
+    const result = await previewTurnService(gameId, {playerName, playerId, text});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Preview turn requested for game ${gameId} by ${playerName}`);
+    res.json({preview: result.preview, order: result.order});
 };
 
 export const getGameState = async (req, res) => {

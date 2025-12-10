@@ -12,7 +12,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 import { useUser } from '../../context/UserContext'
-import { useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useSubmitTurn, useGameState, usePreviewTurn } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 
 const Multiplayer = () => {
@@ -22,9 +22,11 @@ const Multiplayer = () => {
   const { user } = useUser()
   const { updateMatch } = useMatch()
   const [story, setStory] = useState('')
+  const [preview, setPreview] = useState('')
   
   const gameId = searchParams.get('gameId')
   const submitTurnMutation = useSubmitTurn()
+  const previewTurnMutation = usePreviewTurn()
   const { data: gameData, isLoading } = useGameState(gameId, {
     enabled: !!gameId,
     refetchInterval: 2000, // Poll every 2 seconds for active games
@@ -64,6 +66,26 @@ const Multiplayer = () => {
       navigate(`/story/${gameId}`)
     }
   }, [game?.status, gameId, navigate])
+
+  const handlePreviewTurn = () => {
+    if (!gameId || !story.trim() || !isMyTurn) return
+
+    setPreview('')
+    previewTurnMutation.mutate({
+      gameId,
+      turnData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: story,
+      },
+    }, {
+      onSuccess: (data) => setPreview(data?.preview || ''),
+      onError: (error) => {
+        console.error('Failed to preview turn:', error)
+        alert(error.message || 'Failed to preview turn. Please try again.')
+      },
+    })
+  }
 
   const handleSubmitTurn = () => {
     if (!gameId || !story.trim() || !isMyTurn) return
@@ -190,12 +212,20 @@ const Multiplayer = () => {
                   placeholder={isMyTurn ? "Continue the story..." : `Waiting for ${game?.currentPlayer || 'player'}...`}
                 />
                 
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={handlePreviewTurn}
+                    disabled={!isMyTurn || !story.trim() || previewTurnMutation.isPending}
+                    className="flex-1 min-w-[180px]"
+                  >
+                    {previewTurnMutation.isPending ? 'Previewing...' : 'Preview AI Response'}
+                  </Button>
                   <Button
                     variant="primary"
                     onClick={handleSubmitTurn}
                     disabled={!isMyTurn || !story.trim() || submitTurnMutation.isPending}
-                    className="flex-1"
+                    className="flex-1 min-w-[180px]"
                   >
                     {submitTurnMutation.isPending ? 'Submitting...' : 'Submit Turn'}
                   </Button>
@@ -207,6 +237,19 @@ const Multiplayer = () => {
                     Clear
                   </Button>
                 </div>
+
+                {(previewTurnMutation.isPending || preview) && (
+                  <Card className="mt-4 bg-soft-charcoal/40">
+                    <div className="text-sm font-bold mb-2 text-mint-pop">AI Preview</div>
+                    {previewTurnMutation.isPending ? (
+                      <div className="text-sm text-cloud-gray">Generating response...</div>
+                    ) : (
+                      <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                        {preview || 'No preview yet.'}
+                      </div>
+                    )}
+                  </Card>
+                )}
 
                 {/* Thread Meter */}
                 <div className="mt-6">
@@ -352,4 +395,3 @@ const Multiplayer = () => {
 }
 
 export default Multiplayer
-
