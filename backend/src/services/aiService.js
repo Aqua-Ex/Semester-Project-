@@ -2,6 +2,20 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 10000);
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
+const GENRES = [
+  'fantasy',
+  'mystery',
+  'horror',
+  'historical',
+  'sci-fi',
+  'romance',
+  'noir',
+  'thriller',
+  'comedy',
+  'adventure',
+  'superhero',
+  'mythic',
+];
 
 const truncate = (text, limit) => {
   if (!text) return '';
@@ -117,27 +131,47 @@ export const generateGuidePrompt = async ({
 
 export { callChatModel };
 
-const buildInitialPromptMessages = (seed) => {
+const pickGenres = (count = 1) => {
+  const pool = [...GENRES];
+  const picks = [];
+  while (pool.length > 0 && picks.length < count) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picks.push(pool.splice(idx, 1)[0]);
+  }
+  return picks;
+};
+
+const buildInitialPromptMessages = (seed, genres = []) => {
   const topic = truncate(seed || 'Invent a fresh, vivid setting with a clear goal and tension.', 200);
+  const genreList = genres.length ? genres.join(', ') : 'any genre';
   return [
     {
       role: 'system',
       content: [
-        'You write concise, vivid opening prompts for a collaborative story game.',
-        'Return exactly 1-2 sentences that set the scene and goal, include a hook, and avoid resolving the plot.',
-        'Make it specific and flavorful; avoid generic fantasy tropes; do not add instructions.',
-      ].join(' '),
+        'You write brief, high-level story premise prompts for a collaborative story game.',
+        'Offer exactly one clear genre from the provided list and state it in the opener.',
+        'Return exactly 1–2 sentences describing what kind of story the player should begin, not the story itself.',
+        'Begin with “Begin writing a … story…” and keep the premise broad.',
+        'Avoid in-world narration, character actions, sensory details, named characters, or specific plot events.',
+        'Avoid adding lore, worldbuilding specifics, or invented terms.',
+        'Provide only a simple premise and the central goal or conflict.'
+].join(' ')
+
     },
     {
       role: 'user',
-      content: `Create a new story opener based on this seed (optional): ${topic}`,
+      content: [
+        `Create a new story opener based on this seed (optional): ${topic}`,
+        `Available genre to surface: ${genreList}.`
+      ].join('\n'),
     },
   ];
 };
 
-const localInitialPrompt = (seed) => {
+const localInitialPrompt = (seed, genres = []) => {
   const base = truncate(seed || 'a fragile mission with everything on the line', 160).trim();
   const seedLine = base.endsWith('.') ? base.slice(0, -1) : base;
+  const genreChoice = genres.length ? genres.join('/') : 'any genre';
   const openers = [
     'Moments before things go wrong,',
     'Under strange skies,',
@@ -153,18 +187,20 @@ const localInitialPrompt = (seed) => {
     'A rumour hints that nothing here is what it seems.',
   ];
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  return `${pick(openers)} ${seedLine}. ${pick(hooks)}`;
+  const hook = pick(hooks).replace(/\.$/, '');
+  return `Begin writing a ${genreChoice} story: ${pick(openers)} ${seedLine}. ${hook}; lean into this genre's tone.`;
 };
 
 export const generateInitialPrompt = async (seed) => {
-  const fallback = localInitialPrompt(seed);
+  const genres = pickGenres();
+  const fallback = localInitialPrompt(seed, genres);
 
   if (!GROQ_API_KEY) {
     return fallback;
   }
 
   try {
-    const messages = buildInitialPromptMessages(seed);
+    const messages = buildInitialPromptMessages(seed, genres);
     const prompt = await callChatModel(messages, { temperature: 0.8, max_tokens: 90 });
     return prompt || fallback;
   } catch (error) {

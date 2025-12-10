@@ -179,9 +179,7 @@ export const createGame = async ({
   if (!hostId) {
     throw new Error('hostId is required (Google user id)');
   }
-  const seedPrompt =
-    initialPrompt?.trim() ||
-    'This is a sci-fi story where a captain needs to navigate the galaxy on his spaceship with the help of his trusty crew.';
+  const seedPrompt = initialPrompt?.trim() || '';
   const prompt = await generateInitialPrompt(seedPrompt);
 
   const isRapid = mode === MODES.RAPID;
