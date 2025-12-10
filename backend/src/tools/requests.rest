@@ -14,7 +14,7 @@ Content-Type: application/json
 }
 
 ### Join an existing game (1)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
+POST http://localhost:3001/api/game/b69b22a0-1078-4983-ac63-40899122af2b/join
 Content-Type: application/json
 
 {

@@ -202,7 +202,7 @@ export const createGame = async ({
     hostName: cleanHost,
     status: isRapid ? 'active' : 'waiting',
     initialPrompt: prompt,
-    guidePrompt: prompt,
+    guidePrompt: null,
     storySoFar: prompt,
     lastTurn: null,
     players,

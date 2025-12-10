@@ -45,7 +45,8 @@ describe('gameService', () => {
     });
     expect(game.mode).toBe('single');
     expect(game.players).toHaveLength(1);
-    expect(game.guidePrompt).toBe('INIT-Start');
+    expect(game.initialPrompt).toBe('INIT-Start');
+    expect(game.guidePrompt).toBeNull();
     expect(game.currentPlayer).toBe(host.name);
   });
 

@@ -135,9 +135,29 @@ const buildInitialPromptMessages = (seed) => {
   ];
 };
 
+const localInitialPrompt = (seed) => {
+  const base = truncate(seed || 'a fragile mission with everything on the line', 160).trim();
+  const seedLine = base.endsWith('.') ? base.slice(0, -1) : base;
+  const openers = [
+    'Moments before things go wrong,',
+    'Under strange skies,',
+    'On the verge of disaster,',
+    'Deep in unfamiliar territory,',
+    'During a rare alignment,',
+  ];
+  const hooks = [
+    'A ticking clock forces a daring move.',
+    'An unlikely ally offers help but demands a price.',
+    'A secret rule threatens to flip the plan upside down.',
+    'Everyone senses the ground is about to shift.',
+    'A rumour hints that nothing here is what it seems.',
+  ];
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  return `${pick(openers)} ${seedLine}. ${pick(hooks)}`;
+};
+
 export const generateInitialPrompt = async (seed) => {
-  const fallback =
-    'This is a sci-fi story where a captain needs to navigate the galaxy on his spaceship with the help of his trusty crew.';
+  const fallback = localInitialPrompt(seed);
 
   if (!GROQ_API_KEY) {
     return fallback;
