@@ -109,8 +109,14 @@ export const gameAPI = {
    * @param {string} gameId - Game ID
    * @returns {Promise<Object>} Game state and info
    */
-  getGameState: async (gameId) => {
-    return apiRequest(`/api/game/${gameId}`, {
+  getGameState: async (gameId, opts = {}) => {
+    const search = new URLSearchParams();
+    if (opts.includeTurns) {
+      search.set('includeTurns', 'true');
+    }
+    const query = search.toString();
+    const url = query ? `/api/game/${gameId}?${query}` : `/api/game/${gameId}`;
+    return apiRequest(url, {
       method: 'GET',
     });
   },
@@ -125,6 +131,82 @@ export const gameAPI = {
     return apiRequest(`/api/game/${gameId}/start`, {
       method: 'POST',
       body: data,
+    });
+  },
+
+  /**
+   * Update lobby settings (host only)
+   */
+  updateGameSettings: async (gameId, settings) => {
+    return apiRequest(`/api/game/${gameId}/settings`, {
+      method: 'POST',
+      body: settings,
+    });
+  },
+
+  /**
+   * Host abandons/finishes a lobby
+   */
+  abandonGame: async (gameId, data = {}) => {
+    return apiRequest(`/api/game/${gameId}/abandon`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  /**
+   * Cleanup all waiting lobbies (admin)
+   */
+  cleanupLobbies: async () => {
+    return apiRequest('/api/game/cleanup-lobbies', {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * List available multiplayer lobbies waiting for players
+   * @param {number} limit - Maximum number of lobbies to return
+   */
+  listLobbies: async (limit = 25, opts = {}) => {
+    const searchParams = new URLSearchParams({ limit: String(limit) });
+    if (opts.minCreatedAt) {
+      searchParams.set('minCreatedAt', opts.minCreatedAt);
+    }
+    return apiRequest(`/api/game/lobbies?${searchParams.toString()}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Request to join a multiplayer lobby (host approval required)
+   * @param {string} gameId - Lobby/game ID
+   * @param {Object} playerData - Player info
+   */
+  requestToJoin: async (gameId, playerData) => {
+    return apiRequest(`/api/game/${gameId}/request-join`, {
+      method: 'POST',
+      body: playerData,
+    });
+  },
+
+  /**
+   * Host reviews a join request
+   * @param {string} gameId - Lobby/game ID
+   * @param {Object} decision - Review payload containing hostId, playerId, approve
+   */
+  reviewJoinRequest: async (gameId, decision) => {
+    return apiRequest(`/api/game/${gameId}/review-join`, {
+      method: 'POST',
+      body: decision,
+    });
+  },
+
+  /**
+   * Get latest finished games for a user
+   */
+  getUserHistory: async (userId, limit = 5) => {
+    return apiRequest(`/api/game/user/${userId}/history?limit=${limit}`, {
+      method: 'GET',
     });
   },
 };

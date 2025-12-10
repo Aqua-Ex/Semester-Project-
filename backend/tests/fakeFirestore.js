@@ -19,7 +19,43 @@ const makeDocRef = (collection, id) => {
   };
 };
 
+const applyFilters = (docs, filters) => {
+  if (!filters.length) return docs;
+  return docs.filter((entry) =>
+    filters.every(({ field, op, value }) => {
+      const current = entry.data()[field];
+      if (op === '==') return current === value;
+      if (op === '>=') return current >= value;
+      if (op === '<=') return current <= value;
+      return false;
+    }),
+  );
+};
+
 const makeCollection = (db, path) => {
+  const buildQuery = (col, filters = [], order = null, limitVal = null) => ({
+    where: (field, op, value) => buildQuery(col, [...filters, { field, op, value }], order, limitVal),
+    orderBy: (field, direction = 'asc') =>
+      buildQuery(col, filters, { field, direction }, limitVal),
+    limit: (n) => buildQuery(col, filters, order, n),
+    get: async () => {
+      let docs = Array.from(col._docs.entries()).map(([id, data]) => ({ id, data: () => data }));
+      docs = applyFilters(docs, filters);
+      if (order) {
+        docs.sort((a, b) => {
+          const av = a.data()[order.field];
+          const bv = b.data()[order.field];
+          if (av === bv) return 0;
+          return order.direction === 'desc' ? (av > bv ? -1 : 1) : av > bv ? 1 : -1;
+        });
+      }
+      if (Number.isFinite(limitVal)) {
+        docs = docs.slice(0, limitVal);
+      }
+      return { docs };
+    },
+  });
+
   const col = {
     _db: db,
     path,
@@ -30,19 +66,8 @@ const makeCollection = (db, path) => {
       ref.set(data);
       return ref;
     },
-    orderBy: (field, direction = 'asc') => ({
-      get: async () => {
-        const docs = Array.from(col._docs.entries())
-          .map(([id, data]) => ({ id, data: () => data }))
-          .sort((a, b) => {
-            const av = a.data()[field];
-            const bv = b.data()[field];
-            if (av === bv) return 0;
-            return direction === 'desc' ? (av > bv ? -1 : 1) : av > bv ? 1 : -1;
-          });
-        return { docs };
-      },
-    }),
+    where: (field, op, value) => buildQuery(col, [{ field, op, value }]),
+    orderBy: (field, direction = 'asc') => buildQuery(col, [], { field, direction }),
     get: async () => {
       const docs = Array.from(col._docs.entries()).map(([id, data]) => ({ id, data: () => data }));
       return { docs };

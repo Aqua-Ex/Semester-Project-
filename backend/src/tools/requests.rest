@@ -1,89 +1,152 @@
-### Create a new game
-# @name createGame
-POST http://localhost:3001/api/game/create
+@base = http://localhost:3001
+@singleHostId = user-1
+@multiHostId = host-1
+@player2Id = player-2
+@player3Id = player-3
+
+############################################################
+# Single-player vs AI flow
+############################################################
+
+### Create single-player game (AI auto-joins)
+# @name singleCreate
+POST {{base}}/api/game/create
 Content-Type: application/json
 
 {
   "hostName": "Tester",
-  "hostId": "tester-user-1",
-  "initialPrompt": "",
-  "turnDurationSeconds": 60,
+  "hostId": "{{singleHostId}}",
+  "initialPrompt": "A quiet village hides a secret.",
+  "turnDurationSeconds": 120,
+  "maxTurns": 2,
+  "maxPlayers": 2,
+  "mode": "single"
+}
+
+### Get game state (with turns) to confirm prompt and timer
+GET {{base}}/api/game/{{singleCreate.response.body.game.id}}?includeTurns=true
+
+### Submit human turn (turn 1)
+POST {{base}}/api/game/{{singleCreate.response.body.game.id}}/turn
+Content-Type: application/json
+
+{
+  "playerName": "Tester",
+  "playerId": "{{singleHostId}}",
+  "text": "The lantern flickered as the door creaked open."
+}
+
+### Poll game state to see AI turn and status
+GET {{base}}/api/game/{{singleCreate.response.body.game.id}}?includeTurns=true
+
+############################################################
+# Multiplayer flow
+############################################################
+
+### Create multiplayer game
+# @name multiCreate
+POST {{base}}/api/game/create
+Content-Type: application/json
+
+{
+  "hostName": "Host",
+  "hostId": "{{multiHostId}}",
+  "turnDurationSeconds": 120,
   "maxTurns": 3,
   "maxPlayers": 3,
   "mode": "multi"
 }
 
-### Join an existing game (1)
-POST http://localhost:3001/api/game/a02c62c8-081a-418e-b2b7-43b83c9183bd/join
+### Join as Player 2
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/join
 Content-Type: application/json
 
 {
   "playerName": "Player2",
-  "playerId": "player2-user-1"
+  "playerId": "{{player2Id}}"
 }
 
-### Join an existing game (2)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
+### Join as Player 3
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/join
 Content-Type: application/json
 
 {
   "playerName": "Player3",
-  "playerId": "player3-user-1"
+  "playerId": "{{player3Id}}"
 }
 
-### Submit a turn (uses ID from createGame)
-POST http://localhost:3001/api/game/d4875d3d-6ccf-4245-ad18-a7a33dc17675/turn
+### Start game (host only)
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/start
+Content-Type: application/json
+
+{
+  "playerId": "{{multiHostId}}"
+}
+
+### Host submits turn 1
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/turn
+Content-Type: application/json
+
+{
+  "playerName": "Host",
+  "playerId": "{{multiHostId}}",
+  "text": "Host opens the story."
+}
+
+### Player 2 submits turn 2
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/turn
 Content-Type: application/json
 
 {
   "playerName": "Player2",
-  "playerId": "player2-user-1",
-  "text": "The ballet dancers demanded that the crew leave the ship"
+  "playerId": "{{player2Id}}",
+  "text": "Player2 adds a twist."
 }
 
-### Submit turn 2 (Player2)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
-Content-Type: application/json
-
-{
-  "playerName": "Player2",
-  "playerId": "player2-user-1",
-  "text": "A distant howl echoed, and the canopy seemed to bend toward him."
-}
-
-### Submit turn 3 (Player3) - should finish the game and return scores
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+### Player 3 submits turn 3 (should finish)
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/turn
 Content-Type: application/json
 
 {
   "playerName": "Player3",
-  "playerId": "player3-user-1",
-  "text": "A silver light flickered ahead, promising safety or a trap."
+  "playerId": "{{player3Id}}",
+  "text": "Player3 closes the loop."
 }
 
-### Preview a turn (uses ID from createGame)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/preview
+### Get game state with turns and scores
+GET {{base}}/api/game/{{multiCreate.response.body.game.id}}?includeTurns=true
+
+### Preview a turn (for any active game)
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/preview
 Content-Type: application/json
 
 {
   "playerName": "Player2",
-  "playerId": "player2-user-1",
+  "playerId": "{{player2Id}}",
   "text": "A quick sample turn text to get a preview prompt."
 }
 
-### Get game state (uses ID from createGame)
-GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}
+############################################################
+# Lobbies and history
+############################################################
 
-########################################
-# Start flow for multiplayer (host + players)
+### List open lobbies
+GET {{base}}/api/game/lobbies
 
-### Start game (host only)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/start
+### Fetch recent games for a user (history)
+GET {{base}}/api/game/user/{{singleHostId}}/history?limit=5
+
+### Abandon lobby (host only)
+POST {{base}}/api/game/{{multiCreate.response.body.game.id}}/abandon
 Content-Type: application/json
 
 {
-  "playerId": "tester-user-1"
+  "playerId": "{{multiHostId}}",
+  "reason": "host_left"
 }
 
-### Get game state after start (should show status: active)
-GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}
+### Cleanup waiting lobbies (admin)
+POST {{base}}/api/game/cleanup-lobbies
+Content-Type: application/json
+
+{}

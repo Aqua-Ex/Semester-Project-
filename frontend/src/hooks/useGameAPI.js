@@ -81,18 +81,63 @@ export const useStartGame = () => {
 };
 
 /**
+ * Hook to update lobby settings (e.g., max players)
+ */
+export const useUpdateGameSettings = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, settings }) => gameAPI.updateGameSettings(gameId, settings),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
+  });
+};
+
+/**
+ * Hook to request to join a lobby (host approval)
+ */
+export const useRequestJoin = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, playerData }) => gameAPI.requestToJoin(gameId, playerData),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
+  });
+};
+
+/**
+ * Hook for hosts to review join requests
+ */
+export const useReviewJoinRequest = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, decision }) => gameAPI.reviewJoinRequest(gameId, decision),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+    },
+  });
+};
+
+/**
  * Hook to fetch game state
  * Automatically polls if game is active
  */
 export const useGameState = (gameId, options = {}) => {
-  const { enabled = true, refetchInterval = null, refetchWhileWaiting = false } = options;
+  const { enabled = true, refetchInterval = null, refetchWhileWaiting = false, includeTurns = false } = options;
 
   return useQuery({
     queryKey: ['game', gameId],
-    queryFn: () => gameAPI.getGameState(gameId),
+    queryFn: () => gameAPI.getGameState(gameId, { includeTurns }),
     enabled: enabled && !!gameId,
     refetchInterval: (query) => {
       // Explicit interval overrides
+      if (typeof refetchInterval === 'function') return refetchInterval(query);
       if (refetchInterval) return refetchInterval;
 
       // Auto-refetch if game is active or if caller wants updates while waiting
@@ -113,5 +158,47 @@ export const useGameState = (gameId, options = {}) => {
 export const usePollGameState = (gameId, interval = 2000) => {
   return useGameState(gameId, {
     refetchInterval: interval,
+  });
+};
+
+/**
+ * Hook to fetch open multiplayer lobbies
+ */
+export const useAvailableLobbies = (options = {}) => {
+  const { enabled = true, refetchInterval = 5000, minCreatedAt = null } = options;
+
+  return useQuery({
+    queryKey: ['lobbies', minCreatedAt],
+    queryFn: () => gameAPI.listLobbies(undefined, { minCreatedAt }),
+    enabled,
+    refetchInterval,
+    refetchIntervalInBackground: true,
+  });
+};
+
+/**
+ * Host abandons/finishes a lobby
+ */
+export const useAbandonGame = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, playerId, reason }) => gameAPI.abandonGame(gameId, { playerId, reason }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
+  });
+};
+
+/**
+ * Hook to fetch recent games for a user
+ */
+export const useUserHistory = (userId, limit = 5) => {
+  return useQuery({
+    queryKey: ['user-history', userId, limit],
+    queryFn: () => gameAPI.getUserHistory(userId, limit),
+    enabled: !!userId,
+    staleTime: 60_000,
   });
 };

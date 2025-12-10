@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useMemo, useState, useCallback } from 'react'
 
 const MatchContext = createContext(null)
 
@@ -16,19 +16,19 @@ export const MatchProvider = ({ children }) => {
     scores: {},
   })
 
-  const startMatch = (matchData) => {
+  const startMatch = useCallback((matchData) => {
     setCurrentMatch({ ...matchData, status: 'playing' })
-  }
+  }, [])
 
-  const updateMatch = (updates) => {
+  const updateMatch = useCallback((updates) => {
     setCurrentMatch(prev => ({ ...prev, ...updates }))
-  }
+  }, [])
 
-  const endMatch = () => {
+  const endMatch = useCallback(() => {
     setCurrentMatch(prev => ({ ...prev, status: 'finished' }))
-  }
+  }, [])
 
-  const resetMatch = () => {
+  const resetMatch = useCallback(() => {
     setCurrentMatch({
       id: null,
       mode: null,
@@ -41,10 +41,18 @@ export const MatchProvider = ({ children }) => {
       status: 'waiting',
       scores: {},
     })
-  }
+  }, [])
+
+  const value = useMemo(() => ({
+    currentMatch,
+    startMatch,
+    updateMatch,
+    endMatch,
+    resetMatch,
+  }), [currentMatch, startMatch, updateMatch, endMatch, resetMatch])
 
   return (
-    <MatchContext.Provider value={{ currentMatch, startMatch, updateMatch, endMatch, resetMatch }}>
+    <MatchContext.Provider value={value}>
       {children}
     </MatchContext.Provider>
   )
@@ -57,4 +65,3 @@ export const useMatch = () => {
   }
   return context
 }
-

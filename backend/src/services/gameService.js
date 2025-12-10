@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../firebase.js';
-import { generateGuidePrompt, generateInitialPrompt } from './aiService.js';
+import { generateGuidePrompt, generateInitialPrompt, generateAiTurnText } from './aiService.js';
 import { scoreGame } from './scoringService.js';
 
 const gamesCollection = db.collection('games');
@@ -36,6 +36,9 @@ const clamp = (value, min, max, fallback) => {
 
 const nowIso = () => new Date().toISOString();
 
+const AI_PLAYER = { id: 'ai-bot', name: 'AI Opponent' };
+const isAiPlayer = (player) => player?.id === AI_PLAYER.id;
+
 const scrubGameForPlayer = (game) => {
   if (!game) return game;
   const { storySoFar, ...rest } = game;
@@ -43,6 +46,7 @@ const scrubGameForPlayer = (game) => {
     ...rest,
     // For display purposes, show the opener as the active prompt until the first guide exists.
     guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+    pendingRequests: rest.pendingRequests || [],
   };
 };
 
@@ -67,6 +71,32 @@ const advanceTurnState = (game) => {
   };
 };
 
+const shouldTriggerAiTurn = (game) =>
+  game &&
+  game.mode === MODES.SINGLE &&
+  game.status === 'active' &&
+  game.currentPlayerId === AI_PLAYER.id &&
+  (game.players || []).some(isAiPlayer);
+
+const addPlayerToGame = (game, { playerId, playerName }) => {
+  const players = game.players || [];
+  if (players.find((p) => p.id === playerId || p.name === playerName)) {
+    return { game };
+  }
+
+  if (players.length >= game.maxPlayers) {
+    return { error: 'Game is full', status: 400 };
+  }
+
+  return {
+    game: {
+      ...game,
+      players: [...players, { id: playerId, name: playerName }],
+      updatedAt: nowIso(),
+    },
+  };
+};
+
 const saveFinishedGameForUser = async (userId, summary) => {
   if (!userId) return;
   const savedGamesRef = usersCollection.doc(userId).collection('savedGames');
@@ -78,6 +108,26 @@ const saveFinishedGameForUser = async (userId, summary) => {
   }
 
   await savedGamesRef.doc(summary.gameId).set(summary);
+};
+
+export const getUserHistory = async (userId, limit = 5) => {
+  if (!userId) {
+    return { error: 'userId is required', status: 400 };
+  }
+
+  const savedGamesRef = usersCollection
+    .doc(userId)
+    .collection('savedGames')
+    .orderBy('createdAt', 'desc')
+    .limit(Math.max(1, Math.min(limit, 10)));
+
+  const snap = await savedGamesRef.get();
+  const games = snap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  return { games };
 };
 
 const updateLeaderboard = async (playerScores, players, summary) => {
@@ -188,14 +238,14 @@ export const createGame = async ({
     ? RAPID_CONFIG.initialDurationSeconds
     : clamp(turnDurationSeconds, 30, 600, 60);
   const turnsCap = clamp(maxTurns, 1, 50, isRapid ? 50 : 5);
-  const minPlayers = mode === MODES.SINGLE || isRapid ? 1 : 2;
-  const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 1 : 3;
+  const minPlayers = mode === MODES.SINGLE ? 2 : isRapid ? 1 : 2;
+  const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 2 : 3;
   const playerCap = clamp(maxPlayers, minPlayers, 7, defaultCap);
 
   const gameId = randomUUID();
   const createdAt = nowIso();
 
-  const players = [{ id: hostId, name: cleanHost }];
+  const players = isSingle ? [{ id: hostId, name: cleanHost }, AI_PLAYER] : [{ id: hostId, name: cleanHost }];
 
   const gameMode = isRapid ? MODES.RAPID : isSingle ? MODES.SINGLE : MODES.MULTI;
   const initialStatus = isRapid || isSingle ? 'active' : 'waiting';
@@ -218,6 +268,8 @@ export const createGame = async ({
     turnDurationSeconds: duration,
     maxTurns: turnsCap,
     maxPlayers: playerCap,
+    requiresApproval: gameMode === MODES.MULTI,
+    pendingRequests: [],
     turnDeadline: initialDeadline,
     currentPlayerIndex: 0,
     currentPlayer: cleanHost,
@@ -229,6 +281,71 @@ export const createGame = async ({
 
   await gamesCollection.doc(gameId).set(game);
   return game;
+};
+
+export const updateGameSettings = async (gameId, { hostId, maxPlayers, turnDurationSeconds }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  if (!hostId) {
+    return { error: 'Host id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.hostId !== hostId) {
+      return { error: 'Only the host can update lobby settings', status: 403 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game has already started', status: 400 };
+    }
+
+    const updates = {};
+
+    if (typeof maxPlayers !== 'undefined') {
+      const currentPlayers = (game.players || []).length;
+      const minPlayers = game.mode === MODES.SINGLE ? 1 : 2;
+      const minCap = Math.max(currentPlayers, minPlayers);
+      const requestedCap = clamp(maxPlayers, minCap, 7, game.maxPlayers || minCap);
+
+      if (!Number.isFinite(requestedCap)) {
+        return { error: 'Invalid maxPlayers value', status: 400 };
+      }
+
+      if (requestedCap !== game.maxPlayers) {
+        updates.maxPlayers = requestedCap;
+      }
+    }
+
+    if (typeof turnDurationSeconds !== 'undefined') {
+      const requestedDuration = clamp(turnDurationSeconds, 30, 600, game.turnDurationSeconds || 60);
+      if (!Number.isFinite(requestedDuration)) {
+        return { error: 'Invalid turnDurationSeconds value', status: 400 };
+      }
+      if (requestedDuration !== game.turnDurationSeconds) {
+        updates.turnDurationSeconds = requestedDuration;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { game };
+    }
+
+    const updated = {
+      ...game,
+      ...updates,
+      updatedAt: nowIso(),
+    };
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
 };
 
 export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) => {
@@ -254,8 +371,17 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
       return { error: 'Game has finished', status: 400 };
     }
 
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
     if (game.mode !== MODES.MULTI) {
       return { error: 'Cannot join a single-player game', status: 400 };
+    }
+
+    const requiresApproval = game.requiresApproval ?? game.mode === MODES.MULTI;
+    if (requiresApproval && playerId !== game.hostId) {
+      return { error: 'Host approval required', status: 403 };
     }
 
     const already = (game.players || []).find((p) => p.id === playerId || p.name === trimmedName);
@@ -263,18 +389,11 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
       return { game };
     }
 
-    if ((game.players || []).length >= game.maxPlayers) {
-      return { error: 'Game is full', status: 400 };
-    }
+    const addition = addPlayerToGame(game, { playerId, playerName: trimmedName });
+    if (addition.error) return addition;
 
-    const updated = {
-      ...game,
-      players: [...(game.players || []), { id: playerId, name: trimmedName }],
-      updatedAt: nowIso(),
-    };
-
-    tx.set(gameRef, updated);
-    return { game: updated };
+    tx.set(gameRef, addition.game);
+    return addition;
   });
 
   return result;
@@ -406,17 +525,18 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
     }
 
     const cleanText = text.trim();
+    const sanitizedText = cleanText.replace(/<[^>]*>/g, '').trim();
     const order = (game.turnsCount || 0) + 1;
     const currentPrompt = game.guidePrompt || game.initialPrompt;
     const storySoFar = game.storySoFar || game.initialPrompt || '';
-    const updatedStory = [storySoFar, cleanText].filter(Boolean).join('\n');
+    const updatedStory = [storySoFar, sanitizedText].filter(Boolean).join('\n');
 
     const willFinish = game.maxTurns ? order >= game.maxTurns : false;
     const nextPrompt = willFinish
       ? null
       : await generateGuidePrompt({
           storySoFar: updatedStory,
-          lastTurnText: cleanText,
+          lastTurnText: sanitizedText,
           previousPrompt: currentPrompt,
           turnNumber: order + 1,
           initialPrompt: game.initialPrompt,
@@ -428,7 +548,7 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       order,
       playerName: trimmedName,
       playerId,
-      text: cleanText,
+      text: sanitizedText,
       promptUsed: currentPrompt,
       guidePrompt: currentPrompt,
       createdAt: nowIso(),
@@ -449,7 +569,7 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       lastTurn: {
         playerName: trimmedName,
         playerId,
-        text: cleanText,
+        text: sanitizedText,
         order,
         promptUsed: currentPrompt,
       },
@@ -477,8 +597,24 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
   if (result?.finished) {
     try {
       scores = await scoreGame(result.game);
-      await gamesCollection.doc(gameId).set({ scores }, { merge: true });
-      result.game.scores = scores;
+      // Add simple total metric for quick display
+      const scoresWithTotals = scores
+        ? {
+            ...scores,
+            players: Object.fromEntries(
+              Object.entries(scores.players || {}).map(([name, metrics]) => {
+                const creativity = Number(metrics?.creativity) || 0;
+                const cohesion = Number(metrics?.cohesion ?? metrics?.continuity) || 0;
+                const promptFit = Number(metrics?.prompt_fit ?? metrics?.promptFit ?? metrics?.momentum) || 0;
+                const total = Math.round((creativity + cohesion + promptFit) / 3);
+                return [name, { ...metrics, total }];
+              }),
+            ),
+          }
+        : null;
+
+      await gamesCollection.doc(gameId).set({ scores: scoresWithTotals }, { merge: true });
+      result.game.scores = scoresWithTotals;
       // Persist last 5 games per player (exclude AI)
       const turnsSnapshot = await gamesCollection
         .doc(gameId)
@@ -495,32 +631,96 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       const summary = {
         gameId,
         createdAt: nowIso(),
+        finishedAt: nowIso(),
         summary: scores?.summary || 'Game finished',
         maxTurns: result.game.maxTurns,
+        maxPlayers: result.game.maxPlayers,
+        mode: result.game.mode,
+        hostId: result.game.hostId,
+        hostName: result.game.hostName,
+        playerCount: (result.game.players || []).length,
+        turnDurationSeconds: result.game.turnDurationSeconds,
         turns: turnSummaries,
-        scores: scores?.players || null,
+        scores: scoresWithTotals?.players || null,
       };
       const humanPlayers = (result.game.players || []).filter((p) => p.id !== 'ai-bot');
       await Promise.all(
         humanPlayers.map((p) => saveFinishedGameForUser(p.id, { ...summary, playerName: p.name })),
       );
       // Leaderboard update
-      await updateLeaderboard(scores, humanPlayers, summary);
+      await updateLeaderboard(scoresWithTotals || scores, humanPlayers, summary);
     } catch (error) {
       console.warn('[gameService] scoring persistence failed:', error);
     }
   }
 
+  // If we're in a single-player (1v1 vs AI) game and it's now the AI's turn, queue an AI response.
+  if (!result?.finished && shouldTriggerAiTurn(result.game)) {
+    queueAiTurn(gameId);
+  }
+
   return { ...result, scores };
 };
 
-export const getGameState = async (gameId) => {
+const queueAiTurn = (gameId) => {
+  setTimeout(() => {
+    performAiTurn(gameId).catch((err) => console.warn('[gameService] AI turn failed:', err?.message || err));
+  }, 0);
+};
+
+const performAiTurn = async (gameId) => {
+  const snap = await gamesCollection.doc(gameId).get();
+  if (!snap.exists) return;
+
+  const game = snap.data();
+  if (!shouldTriggerAiTurn(game)) return;
+  const startedAt = Date.now();
+
+  // Keep the AI's deadline fresh while it generates text
+  const freshDeadline = new Date(Date.now() + (Math.max(10, game.turnDurationSeconds || 60)) * 1000).toISOString();
+  await gamesCollection.doc(gameId).set({ turnDeadline: freshDeadline, updatedAt: nowIso() }, { merge: true });
+
+  const promptForAi = game.guidePrompt || game.initialPrompt || 'Continue the story.';
+  const storySoFar = game.storySoFar || game.initialPrompt || '';
+  console.log('[gameService] AI turn begin', {
+    gameId,
+    promptLength: (promptForAi || '').length,
+    storyLength: (storySoFar || '').length,
+  });
+  const aiTextRaw = await generateAiTurnText({
+    storySoFar,
+    prompt: promptForAi,
+    initialPrompt: game.initialPrompt,
+  });
+
+  const aiText = (aiTextRaw || '').replace(/<[^>]*>/g, '').trim();
+
+  await submitTurn(gameId, { playerId: AI_PLAYER.id, playerName: AI_PLAYER.name, text: aiText });
+  console.log('[gameService] AI turn submitted', {
+    gameId,
+    durationMs: Date.now() - startedAt,
+    textLength: (aiText || '').length,
+  });
+};
+
+export const getGameState = async (gameId, { includeTurns = false } = {}) => {
   const snap = await gamesCollection.doc(gameId).get();
   if (!snap.exists) {
     return { error: 'Game not found', status: 404 };
   }
 
   let game = snap.data();
+
+  // Ensure active games always have a running deadline (especially for initial turn)
+  if (game.status === 'active' && (!game.turnDeadline || !Number.isFinite(new Date(game.turnDeadline).getTime()))) {
+    const restoredDeadline = new Date(Date.now() + (game.turnDurationSeconds || 60) * 1000).toISOString();
+    game = {
+      ...game,
+      turnDeadline: restoredDeadline,
+      updatedAt: nowIso(),
+    };
+    await gamesCollection.doc(gameId).set({ turnDeadline: restoredDeadline, updatedAt: game.updatedAt }, { merge: true });
+  }
 
   // Auto-finish rapid games when the timer expires
   if (game.mode === MODES.RAPID && game.status === 'active' && game.turnDeadline) {
@@ -543,12 +743,33 @@ export const getGameState = async (gameId) => {
   const timeRemainingSeconds = Number.isFinite(deadlineMs)
     ? Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))
     : null;
+  const playerCount = (game.players || []).length;
   const remainingTurns = game.maxTurns
     ? Math.max(0, game.maxTurns - (game.turnsCount || 0))
     : null;
-  const isFull = game.players.length >= game.maxPlayers;
+  const isFull = playerCount >= game.maxPlayers;
 
   const visibleGame = scrubGameForPlayer(game);
+  let turns = [];
+  let storyText = null;
+
+  if (includeTurns) {
+    const turnsSnap = await gamesCollection.doc(gameId).collection('turns').orderBy('order', 'asc').get();
+    turns = turnsSnap.docs.map((d) => {
+      const t = d.data();
+      return {
+        order: t.order,
+        playerName: t.playerName,
+        playerId: t.playerId || null,
+        text: t.text,
+        promptUsed: t.promptUsed || t.guidePrompt || null,
+        createdAt: t.createdAt || null,
+      };
+    });
+    const parts = [game.initialPrompt || ''];
+    turns.forEach((t) => parts.push(t.text));
+    storyText = parts.filter(Boolean).join('\n');
+  }
 
   return {
     game: visibleGame,
@@ -559,11 +780,13 @@ export const getGameState = async (gameId) => {
       timeRemainingSeconds,
       remainingTurns,
       maxTurns: game.maxTurns,
-      playerCount: game.players.length,
+      playerCount,
       maxPlayers: game.maxPlayers,
       isFull,
       scores: game.scores || null,
       lastTurn: game.lastTurn || null,
+      turns: includeTurns ? turns : undefined,
+      storyText: includeTurns ? storyText : undefined,
     },
   };
 };
@@ -609,6 +832,353 @@ export const startGame = async (gameId, { playerId } = {}) => {
   });
 
   return result;
+};
+
+export const abandonGame = async (gameId, { playerId, reason = 'host_left' } = {}) => {
+  const gameRef = gamesCollection.doc(gameId);
+
+  if (!playerId) {
+    return { error: 'playerId is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+    if (game.hostId !== playerId) {
+      return { error: 'Only the host can close the lobby', status: 403 };
+    }
+
+    if (game.status === 'finished') {
+      return { game };
+    }
+
+    const updated = {
+      ...game,
+      status: 'finished',
+      currentPlayer: null,
+      currentPlayerId: null,
+      turnDeadline: null,
+      endedReason: reason,
+      updatedAt: nowIso(),
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
+};
+
+export const cleanupWaitingLobbies = async ({ before = null } = {}) => {
+  const snap = await gamesCollection.where('status', '==', 'waiting').get();
+  const batch = db.batch();
+  const cutoffMs = before ? Date.parse(before) : null;
+  let cleared = 0;
+
+  snap.docs.forEach((doc) => {
+    const data = doc.data();
+    if (cutoffMs) {
+      const createdMs = Date.parse(data.createdAt || '');
+      if (!Number.isFinite(createdMs) || createdMs >= cutoffMs) {
+        return;
+      }
+    }
+    const updated = {
+      ...data,
+      status: 'finished',
+      currentPlayer: null,
+      currentPlayerId: null,
+      turnDeadline: null,
+      endedReason: 'cleanup',
+      updatedAt: nowIso(),
+    };
+    batch.set(doc.ref, updated);
+    cleared += 1;
+  });
+
+  await batch.commit();
+  return { cleared };
+};
+
+export const requestToJoin = async (gameId, { playerName = 'Anonymous', playerId }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const trimmedName = playerName?.trim();
+
+  if (!trimmedName) {
+    return { error: 'Player name is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'Player id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status === 'finished') {
+      return { error: 'Game has finished', status: 400 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
+    if (game.mode !== MODES.MULTI) {
+      return { error: 'Cannot join a single-player game', status: 400 };
+    }
+
+    if ((game.players || []).some((p) => p.id === playerId || p.name === trimmedName)) {
+      return { game };
+    }
+
+  if ((game.players || []).length >= game.maxPlayers) {
+    return { error: 'Game is full', status: 400 };
+  }
+
+  const now = nowIso();
+  const pending = game.pendingRequests || [];
+  if (pending.some((req) => req.playerId === playerId)) {
+    return { game: { ...game, pendingRequests: pending, updatedAt: now } };
+  }
+
+  const updated = {
+    ...game,
+    pendingRequests: [
+        ...pending,
+        {
+          playerId,
+          playerName: trimmedName,
+          requestedAt: nowIso(),
+        },
+      ],
+      updatedAt: now,
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated, requested: true };
+  });
+
+  return result;
+};
+
+export const reviewJoinRequest = async (gameId, { hostId, playerId, approve = false }) => {
+  const gameRef = gamesCollection.doc(gameId);
+
+  if (!hostId) {
+    return { error: 'hostId is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'playerId is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+    if (game.hostId !== hostId) {
+      return { error: 'Only the host can manage join requests', status: 403 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
+    const pending = game.pendingRequests || [];
+    const request = pending.find((req) => req.playerId === playerId);
+    if (!request) {
+      return { error: 'Join request not found', status: 404 };
+    }
+
+    const remainingRequests = pending.filter((req) => req.playerId !== playerId);
+    let updatedGame = {
+      ...game,
+      pendingRequests: remainingRequests,
+      updatedAt: nowIso(),
+    };
+
+    if (approve) {
+      const addition = addPlayerToGame(updatedGame, {
+        playerId: request.playerId,
+        playerName: request.playerName,
+      });
+      if (addition.error) return addition;
+      updatedGame = addition.game;
+    }
+
+    tx.set(gameRef, updatedGame);
+    return { game: updatedGame, approved: approve };
+  });
+
+  return result;
+};
+
+const createdToMs = (value) => {
+  if (!value) return 0;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  // Firestore Timestamp-like object
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6);
+  }
+  return 0;
+};
+
+export const listLobbies = async ({ limit = 25, minCreatedAt = null } = {}) => {
+  const maxLimit = Math.max(1, Math.min(limit, 50));
+  const cutoffMs = minCreatedAt ? Date.parse(minCreatedAt) : null;
+  const staleMs = 5 * 60 * 1000; // 5 minutes
+
+  const toLobby = (game) => ({
+    id: game.id,
+    hostName: game.hostName || 'Host',
+    createdAt: game.createdAt || null,
+    playerCount: (game.players || []).length,
+    maxPlayers: game.maxPlayers || 0,
+    requiresApproval: game.requiresApproval ?? game.mode === MODES.MULTI,
+    pendingRequests: (game.pendingRequests || []).length,
+  });
+
+  try {
+    let query = gamesCollection.where('status', '==', 'waiting');
+    if (minCreatedAt) {
+      query = query.where('createdAt', '>=', minCreatedAt);
+    }
+    query = query.orderBy('createdAt', 'desc').limit(maxLimit);
+
+    const snap = await query.get();
+    const raw = snap.docs.map((doc) => doc.data());
+    const now = Date.now();
+    const staleIds = [];
+    const filtered = raw
+      .filter((g) => (g.mode || MODES.MULTI) === MODES.MULTI)
+      .filter((g) => {
+        const createdMs = createdToMs(g.createdAt);
+        const updatedMs = createdToMs(g.updatedAt) || createdMs;
+        const age = now - (updatedMs || createdMs);
+        const isStale = age > staleMs;
+        if (isStale) {
+          staleIds.push(g.id);
+          return false;
+        }
+        if (cutoffMs && createdMs < cutoffMs) return false;
+        return true;
+      });
+
+    if (staleIds.length) {
+      const batch = db.batch();
+      staleIds.forEach((id) => {
+        const ref = gamesCollection.doc(id);
+        batch.set(ref, {
+          status: 'finished',
+          currentPlayer: null,
+          currentPlayerId: null,
+          turnDeadline: null,
+          endedReason: 'stale_cleanup',
+          updatedAt: nowIso(),
+        }, { merge: true });
+      });
+      batch.commit().catch((err) => console.warn('[listLobbies] stale cleanup failed', err?.message));
+    }
+
+    console.info('[listLobbies]', {
+      path: 'indexed',
+      limit,
+      minCreatedAt,
+      snapCount: snap.size,
+      returned: filtered.length,
+      staleFiltered: staleIds.length,
+      first: filtered.slice(0, 3).map((g) => ({
+        id: g.id,
+        status: g.status,
+        mode: g.mode,
+        createdAt: g.createdAt,
+      })),
+    });
+
+    return filtered.map(toLobby);
+  } catch (error) {
+    // Fallback for index/type issues: scan waiting lobbies in-memory and limit the result
+    console.warn('[listLobbies] indexed query failed, using fallback', {
+      limit,
+      minCreatedAt,
+      error: error?.message,
+    });
+
+    const snap = await gamesCollection.where('status', '==', 'waiting').get();
+    const raw = snap.docs.map((doc) => doc.data());
+    const now = Date.now();
+    const staleIds = [];
+    const filtered = raw
+      .filter((g) => (g.mode || MODES.MULTI) === MODES.MULTI)
+      .filter((g) => {
+        const createdMs = createdToMs(g.createdAt);
+        const updatedMs = createdToMs(g.updatedAt) || createdMs;
+        const age = now - (updatedMs || createdMs);
+        const isStale = age > staleMs;
+        if (isStale) {
+          staleIds.push(g.id);
+          return false;
+        }
+        if (cutoffMs && createdMs < cutoffMs) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = createdToMs(a.createdAt);
+        const bTime = createdToMs(b.createdAt);
+        return bTime - aTime;
+      })
+      .slice(0, maxLimit);
+
+    if (staleIds.length) {
+      const batch = db.batch();
+      staleIds.forEach((id) => {
+        const ref = gamesCollection.doc(id);
+        batch.set(ref, {
+          status: 'finished',
+          currentPlayer: null,
+          currentPlayerId: null,
+          turnDeadline: null,
+          endedReason: 'stale_cleanup',
+          updatedAt: nowIso(),
+        }, { merge: true });
+      });
+      batch.commit().catch((err) => console.warn('[listLobbies] stale cleanup failed (fallback)', err?.message));
+    }
+
+    console.info('[listLobbies]', {
+      path: 'fallback',
+      limit,
+      minCreatedAt,
+      snapCount: snap.size,
+      returned: filtered.length,
+      staleFiltered: staleIds.length,
+      first: filtered.slice(0, 3).map((g) => ({
+        id: g.id,
+        status: g.status,
+        mode: g.mode,
+        createdAt: g.createdAt,
+      })),
+    });
+
+    return filtered.map(toLobby);
+  }
 };
 
 export const resetGames = async () => {

@@ -17,11 +17,14 @@ const StoryView = () => {
   const { data, isLoading, isError } = useGameState(gameId, {
     enabled: !!gameId,
     refetchInterval: false,
+    includeTurns: true,
   })
 
   const game = data?.game
   const info = data?.info
   const scores = info?.scores || game?.scores
+  const turns = info?.turns || []
+  const storyText = info?.storyText
 
   const playerResults = useMemo(() => {
     if (!scores?.players) return []
@@ -69,9 +72,49 @@ const StoryView = () => {
   const renderContent = () => {
     if (isLoading) {
       return (
-        <Card className="p-10 text-center">
-          <div className="text-lg">Loading game results...</div>
-        </Card>
+        <>
+          <Card className="p-10 text-center">
+            <div className="text-lg">Loading game results...</div>
+          </Card>
+
+          <Card className="p-8">
+            <h3 className={`text-2xl font-header font-bold mb-4 ${themeClasses.text}`}>Story</h3>
+            <div className="space-y-4">
+              <div className={`p-4 rounded-lg ${themeClasses.surface} ${themeClasses.border}`}>
+                <div className="text-xs uppercase tracking-wide text-cloud-gray mb-2">Initial Prompt</div>
+                <div className={`${themeClasses.text}`}>
+                  {initialPrompt}
+                </div>
+              </div>
+              {turns.length > 0 ? (
+                <div className="space-y-3">
+                  {turns.map((turn) => (
+                    <div key={turn.order} className={`p-4 rounded-lg ${themeClasses.surface} ${themeClasses.border}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm text-cloud-gray">Turn {turn.order}</div>
+                        <div className="text-sm font-semibold text-electric-purple">{turn.playerName}</div>
+                      </div>
+                      <p className={`${themeClasses.text}`}>{turn.text?.replace(/<[^>]*>/g, '').trim()}</p>
+                      {turn.promptUsed && (
+                        <div className="mt-3 text-xs text-cloud-gray">
+                          Prompt: <span className={`${themeClasses.text}`}>{turn.promptUsed}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-cloud-gray">No turns found.</div>
+              )}
+              {storyText && (
+                <div className="p-4 rounded-lg bg-soft-charcoal/30">
+                  <div className="text-xs uppercase tracking-wide text-cloud-gray mb-2">Full Story</div>
+                  <pre className="whitespace-pre-wrap break-words text-sm text-cloud-gray">{storyText}</pre>
+                </div>
+              )}
+            </div>
+          </Card>
+        </>
       )
     }
 
@@ -196,6 +239,44 @@ const StoryView = () => {
               ))}
             </div>
           )}
+        </Card>
+
+        <Card className="p-8">
+          <h3 className={`text-2xl font-header font-bold mb-4 ${themeClasses.text}`}>Story</h3>
+          <div className="space-y-4">
+            <div className={`p-4 rounded-lg ${themeClasses.surface} ${themeClasses.border}`}>
+              <div className="text-xs uppercase tracking-wide text-cloud-gray mb-2">Initial Prompt</div>
+              <div className={`${themeClasses.text}`}>
+                {initialPrompt}
+              </div>
+            </div>
+            {turns.length > 0 ? (
+              <div className="space-y-3">
+                {turns.map((turn) => (
+                  <div key={turn.order} className={`p-4 rounded-lg ${themeClasses.surface} ${themeClasses.border}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm text-cloud-gray">Turn {turn.order}</div>
+                      <div className="text-sm font-semibold text-electric-purple">{turn.playerName}</div>
+                    </div>
+                    <p className={`${themeClasses.text}`}>{turn.text?.replace(/<[^>]*>/g, '').trim()}</p>
+                    {turn.promptUsed && (
+                      <div className="mt-3 text-xs text-cloud-gray">
+                        Prompt: <span className={`${themeClasses.text}`}>{turn.promptUsed}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-cloud-gray">No turns found.</div>
+            )}
+            {storyText && (
+              <div className="p-4 rounded-lg bg-soft-charcoal/30">
+                <div className="text-xs uppercase tracking-wide text-cloud-gray mb-2">Full Story</div>
+                <pre className="whitespace-pre-wrap break-words text-sm text-cloud-gray">{storyText}</pre>
+              </div>
+            )}
+          </div>
         </Card>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center">

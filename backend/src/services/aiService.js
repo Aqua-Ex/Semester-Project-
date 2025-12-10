@@ -64,6 +64,7 @@ const fallbackPrompt = ({ storySoFar, lastTurnText }) => {
 const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } = {}) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
@@ -80,14 +81,25 @@ const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } =
       }),
       signal: controller.signal,
     });
+    const durationMs = Date.now() - startedAt;
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.warn('[aiService] model request failed', {
+        model: GROQ_MODEL,
+        status: response.status,
+        durationMs,
+      });
       throw new Error(`Groq request failed: ${response.status} ${errorText}`);
     }
 
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content?.trim();
+    console.log('[aiService] model request success', {
+      model: GROQ_MODEL,
+      durationMs,
+      tokens: json?.usage || null,
+    });
     if (!content) {
       throw new Error('Empty completion from OpenAI');
     }
@@ -130,6 +142,53 @@ export const generateGuidePrompt = async ({
 };
 
 export { callChatModel };
+
+export const generateAiTurnText = async ({
+  storySoFar = '',
+  prompt = '',
+  initialPrompt = '',
+} = {}) => {
+  const context = truncate(storySoFar || initialPrompt || 'The story begins...', 1600);
+  const constraint = truncate(prompt || 'Continue the story with a playful twist.', 240);
+  const fallback = `Using the prompt "${constraint}", continue the story: ${context}`.slice(0, 360);
+
+  if (!GROQ_API_KEY) {
+    return fallback;
+  }
+
+  console.log('[aiService] generateAiTurnText start', {
+    storyLength: context.length,
+    promptLength: constraint.length,
+    model: GROQ_MODEL,
+  });
+
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You are a concise collaborative storyteller. Continue the story for the AI player.',
+        'Write 3-4 sentences (max ~90 words) that naturally weave in the provided prompt/constraint.',
+        'Keep the tone consistent with the story so far and avoid ending the plot; set up the next turn instead.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: [
+        `Story so far: ${context}`,
+        `Prompt to incorporate: ${constraint}`,
+        'Return only the continuation text (no titles or bullet points).',
+      ].join('\n'),
+    },
+  ];
+
+  try {
+    const completion = await callChatModel(messages, { temperature: 0.7, max_tokens: 160 });
+    return completion;
+  } catch (error) {
+    console.warn('[aiService] AI turn generation failed, using fallback:', error);
+    return fallback;
+  }
+};
 
 const pickGenres = (count = 1) => {
   const pool = [...GENRES];

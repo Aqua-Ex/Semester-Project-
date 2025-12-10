@@ -6,10 +6,12 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground, PatternBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
+import { useUser } from '../../context/UserContext'
 
 const Home = () => {
   const navigate = useNavigate()
   const { theme } = useTheme()
+  const { user, logout } = useUser()
   const isDark = theme === 'dark'
 
   const gameModes = [
@@ -43,7 +45,46 @@ const Home = () => {
     <div className={`min-h-screen relative overflow-hidden transition-colors ${
       isDark ? 'bg-deep-graphite' : 'bg-light-bg'
     }`}>
-      <div className="absolute top-4 right-4 z-20">
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-4">
+        {user.isAuthenticated && (
+          <motion.div
+            className="flex items-center gap-3"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            {user.avatar && (
+              <img
+                src={user.avatar}
+                alt={user.username}
+                className="w-10 h-10 rounded-full border-2 border-electric-purple"
+              />
+            )}
+            <span className={`hidden md:block font-header ${
+              isDark ? 'text-white' : 'text-light-text'
+            }`}>
+              {user.username}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                await logout()
+                navigate('/login')
+              }}
+            >
+              Logout
+            </Button>
+          </motion.div>
+        )}
+        {!user.isAuthenticated && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => navigate('/login')}
+          >
+            Sign In
+          </Button>
+        )}
         <ThemeToggle />
       </div>
       <AnimatedBackground variant="default" />
