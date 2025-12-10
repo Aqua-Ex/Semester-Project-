@@ -6,7 +6,7 @@ Content-Type: application/json
 {
   "hostName": "Tester",
   "hostId": "tester-user-1",
-  "initialPrompt": "A traveler enters a mysterious forest...",
+  "initialPrompt": "",
   "turnDurationSeconds": 60,
   "maxTurns": 3,
   "maxPlayers": 3,

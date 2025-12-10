@@ -20,13 +20,14 @@ const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, i
     {
       role: 'system',
       content: [
-        'You create challenging constraints for a collaborative storytelling game.',
-        'Read the story context and craft ONE concise, surprising instruction that makes the next continuation harder while staying coherent enough to be possible.',
-        'Prioritize bizarreness over smooth continuity: force in a wildly out-of-place element (word/phrase/object/character/condition) that barely fits but can be woven in.',
-        'The instruction must start with "Continue the story, but..." and reference concrete details from the context.',
-        'Examples of surprise elements: a specific pun, an odd material, an unexpected refusal, a strange rule, a pop-culture reference, or an impossible environment.',
-        'Keep it under 28 words. Do not write story text, only the instruction.',
-      ].join(' '),
+        'You generate disruptive constraints for a telephone-style collaborative storytelling game.',
+        'Read the story context and craft ONE short instruction that forces the next player to add a new absurd complication that does NOT logically follow from the context.',
+        'Prioritize strangeness over continuity: inject a wildly out-of-place element (object/material/event/rule/creature/condition) that would have less than a 1% chance of appearing naturally.',
+        'The instruction must start with "Continue the story, but..." and MUST reference one concrete detail from the context.',
+        'Acceptable twist types include: an impossible material, a contradictory event, a bizarre transformation, a strange rule everyone must obey, a misplaced modern object, or a surreal interruption.',
+        'Keep it under 22 words. Do NOT continue the story—only output the instruction.',
+      ].join(' ')
+
     },
     {
       role: 'user',
