@@ -525,17 +525,18 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
     }
 
     const cleanText = text.trim();
+    const sanitizedText = cleanText.replace(/<[^>]*>/g, '').trim();
     const order = (game.turnsCount || 0) + 1;
     const currentPrompt = game.guidePrompt || game.initialPrompt;
     const storySoFar = game.storySoFar || game.initialPrompt || '';
-    const updatedStory = [storySoFar, cleanText].filter(Boolean).join('\n');
+    const updatedStory = [storySoFar, sanitizedText].filter(Boolean).join('\n');
 
     const willFinish = game.maxTurns ? order >= game.maxTurns : false;
     const nextPrompt = willFinish
       ? null
       : await generateGuidePrompt({
           storySoFar: updatedStory,
-          lastTurnText: cleanText,
+          lastTurnText: sanitizedText,
           previousPrompt: currentPrompt,
           turnNumber: order + 1,
           initialPrompt: game.initialPrompt,
@@ -547,7 +548,7 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       order,
       playerName: trimmedName,
       playerId,
-      text: cleanText,
+      text: sanitizedText,
       promptUsed: currentPrompt,
       guidePrompt: currentPrompt,
       createdAt: nowIso(),
@@ -568,7 +569,7 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       lastTurn: {
         playerName: trimmedName,
         playerId,
-        text: cleanText,
+        text: sanitizedText,
         order,
         promptUsed: currentPrompt,
       },
@@ -686,11 +687,13 @@ const performAiTurn = async (gameId) => {
     promptLength: (promptForAi || '').length,
     storyLength: (storySoFar || '').length,
   });
-  const aiText = await generateAiTurnText({
+  const aiTextRaw = await generateAiTurnText({
     storySoFar,
     prompt: promptForAi,
     initialPrompt: game.initialPrompt,
   });
+
+  const aiText = (aiTextRaw || '').replace(/<[^>]*>/g, '').trim();
 
   await submitTurn(gameId, { playerId: AI_PLAYER.id, playerName: AI_PLAYER.name, text: aiText });
   console.log('[gameService] AI turn submitted', {
