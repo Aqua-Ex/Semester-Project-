@@ -58,15 +58,6 @@ export const useSubmitTurn = () => {
 };
 
 /**
- * Hook to preview an AI response for a staged turn
- */
-export const usePreviewTurn = () => {
-  return useMutation({
-    mutationFn: ({ gameId, turnData }) => gameAPI.previewTurn(gameId, turnData),
-  });
-};
-
-/**
  * Hook to start a waiting game
  */
 export const useStartGame = () => {
