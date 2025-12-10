@@ -11,7 +11,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useCreateGame, useSubmitTurn, useGameState, usePreviewTurn } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 
 const SinglePlayer = () => {
@@ -21,10 +21,12 @@ const SinglePlayer = () => {
   const { user } = useUser()
   const { startMatch, updateMatch } = useMatch()
   const [story, setStory] = useState('')
+  const [preview, setPreview] = useState('')
   
   const gameId = searchParams.get('gameId')
   const createGameMutation = useCreateGame()
   const submitTurnMutation = useSubmitTurn()
+  const previewTurnMutation = usePreviewTurn()
   const { data: gameData, isLoading } = useGameState(gameId, {
     enabled: !!gameId,
     // Use the query's latest data instead of the not-yet-defined gameData variable
@@ -85,6 +87,28 @@ const SinglePlayer = () => {
       })
     }
   }, [game])
+
+  const handlePreviewTurn = () => {
+    if (!gameId || !story.trim() || !isMyTurn) return
+
+    setPreview('')
+    previewTurnMutation.mutate({
+      gameId,
+      turnData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: story,
+      },
+    }, {
+      onSuccess: (data) => {
+        setPreview(data?.preview || '')
+      },
+      onError: (error) => {
+        console.error('Failed to preview turn:', error)
+        alert(error.message || 'Failed to preview turn. Please try again.')
+      },
+    })
+  }
 
   const handleSubmitTurn = () => {
     if (!gameId || !story.trim() || !isMyTurn) return
@@ -197,10 +221,18 @@ const SinglePlayer = () => {
                       placeholder={isMyTurn ? "Start writing your story..." : "Waiting for StoryBot..."}
                     />
 
-                    <div className="mt-6 flex gap-4">
+                    <div className="mt-6 flex flex-wrap gap-4">
+                      <Button
+                        variant="secondary"
+                        className="flex-1 min-w-[180px]"
+                        onClick={handlePreviewTurn}
+                        disabled={!isMyTurn || !story.trim() || previewTurnMutation.isPending}
+                      >
+                        {previewTurnMutation.isPending ? 'Previewing...' : 'Preview AI Response'}
+                      </Button>
                       <Button
                         variant="primary"
-                        className="flex-1"
+                        className="flex-1 min-w-[180px]"
                         onClick={handleSubmitTurn}
                         disabled={!isMyTurn || !story.trim() || submitTurnMutation.isPending}
                       >
@@ -214,6 +246,19 @@ const SinglePlayer = () => {
                         Clear
                       </Button>
                     </div>
+
+                    {(previewTurnMutation.isPending || preview) && (
+                      <Card className="mt-4 bg-soft-charcoal/40">
+                        <div className="text-sm font-bold mb-2 text-mint-pop">AI Preview</div>
+                        {previewTurnMutation.isPending ? (
+                          <div className="text-sm text-cloud-gray">Generating response...</div>
+                        ) : (
+                          <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                            {preview || 'No preview yet.'}
+                          </div>
+                        )}
+                      </Card>
+                    )}
                     
                     {gameInfo && (
                       <div className="mt-4 text-sm text-center opacity-70">

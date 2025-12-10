@@ -263,6 +263,49 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
   return result;
 };
 
+export const previewTurn = async (gameId, { playerName = 'Anonymous', playerId, text }) => {
+  const trimmedName = playerName?.trim();
+
+  if (!trimmedName) {
+    return { error: 'Player name is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'Player id is required', status: 400 };
+  }
+
+  const snap = await gamesCollection.doc(gameId).get();
+  if (!snap.exists) {
+    return { error: 'Game not found', status: 404 };
+  }
+
+  const game = snap.data();
+
+  if (game.status === 'finished') {
+    return { error: 'Game has finished', status: 400 };
+  }
+
+  const playerObj = (game.players || []).find((p) => p.id === playerId);
+  if (!playerObj) {
+    return { error: 'Player must join the game before previewing a turn', status: 403 };
+  }
+
+  if (!text || !text.trim()) {
+    return { error: 'Turn text is required', status: 400 };
+  }
+
+  const cleanText = text.trim();
+  const lines = cleanText.split(/\n/).filter(Boolean);
+  const lastLine = lines[lines.length - 1] || cleanText;
+
+  const order = (game.turnsCount || 0) + 1;
+  const guidePrompt = await generateGuidePrompt(lastLine, order);
+
+  return {
+    preview: guidePrompt,
+    order,
+  };
+};
+
 export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, text }) => {
   const gameRef = gamesCollection.doc(gameId);
   const trimmedName = playerName?.trim();
