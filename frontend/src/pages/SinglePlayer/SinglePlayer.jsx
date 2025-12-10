@@ -27,7 +27,11 @@ const SinglePlayer = () => {
   const submitTurnMutation = useSubmitTurn()
   const { data: gameData, isLoading } = useGameState(gameId, {
     enabled: !!gameId,
-    refetchInterval: gameData?.game?.status === 'active' ? 2000 : false,
+    // Use the query's latest data instead of the not-yet-defined gameData variable
+    refetchInterval: (query) => {
+      const status = query?.state?.data?.game?.status
+      return status === 'active' ? 2000 : false
+    },
   })
 
   const game = gameData?.game
@@ -228,4 +232,3 @@ const SinglePlayer = () => {
 }
 
 export default SinglePlayer
-

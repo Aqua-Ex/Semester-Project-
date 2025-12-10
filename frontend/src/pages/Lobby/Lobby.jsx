@@ -23,7 +23,6 @@ const Lobby = () => {
   const isDark = theme === 'dark'
   
   const gameId = searchParams.get('gameId')
-  const isHost = !gameId
   
   const [timeLimit, setTimeLimit] = useState(10) // minutes
   const [maxPlayers, setMaxPlayers] = useState(4)
@@ -40,6 +39,8 @@ const Lobby = () => {
   const game = gameData?.game
   const gameInfo = gameData?.info
   const players = game?.players || []
+  // Use gameData directly to avoid any TDZ issues with the local `game` binding
+  const isHost = !gameId || gameData?.game?.hostId === user.id
   const isFull = gameInfo?.isFull || false
   const canStart = players.length >= 2 && isHost
 
