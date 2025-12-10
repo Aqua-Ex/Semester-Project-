@@ -61,6 +61,16 @@ Content-Type: application/json
   "text": "A silver light flickered ahead, promising safety or a trap."
 }
 
+### Preview a turn (uses ID from createGame)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/preview
+Content-Type: application/json
+
+{
+  "playerName": "Player2",
+  "playerId": "player2-user-1",
+  "text": "A quick sample turn text to get a preview prompt."
+}
+
 ### Get game state (uses ID from createGame)
 GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}
 
