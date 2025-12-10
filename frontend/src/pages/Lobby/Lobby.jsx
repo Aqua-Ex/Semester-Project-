@@ -54,11 +54,10 @@ const Lobby = () => {
   // Create game on mount if host
   useEffect(() => {
     if (isHost && !createGameMutation.isPending && !gameId && user.id) {
-      const initialPrompt = 'A traveler enters a mysterious forest...'
       createGameMutation.mutate({
         hostName: user.username || 'Player',
         hostId: user.id,
-        initialPrompt,
+        initialPrompt: '',
         turnDurationSeconds: timeLimit * 60,
         maxTurns: 5,
         maxPlayers,

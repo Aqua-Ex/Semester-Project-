@@ -7,7 +7,8 @@ vi.mock('../src/firebase.js', () => {
 });
 
 vi.mock('../src/services/aiService.js', () => ({
-  generateGuidePrompt: vi.fn(async (lastLine, order) => `GUIDE-${order}-${lastLine}`),
+  generateGuidePrompt: vi.fn(async ({ storySoFar, turnNumber }) => `GUIDE-${turnNumber}-${storySoFar || 'EMPTY'}`),
+  generateInitialPrompt: vi.fn(async (seed) => `INIT-${seed || 'DEFAULT'}`),
   callChatModel: vi.fn(),
 }));
 
@@ -32,7 +33,7 @@ describe('gameService', () => {
     db._reset();
   });
 
-  it('creates a single-player game with StoryBot added', async () => {
+  it('creates a single-player game without adding AI players and seeds a prompt', async () => {
     const { createGame } = await getServices();
     const game = await createGame({
       hostName: host.name,
@@ -43,8 +44,27 @@ describe('gameService', () => {
       mode: 'single',
     });
     expect(game.mode).toBe('single');
-    expect(game.players.map((p) => p.name)).toContain('StoryBot');
+    expect(game.players).toHaveLength(1);
+    expect(game.initialPrompt).toBe('INIT-Start');
+    expect(game.guidePrompt).toBeNull();
     expect(game.currentPlayer).toBe(host.name);
+  });
+
+  it('exposes the initial prompt as the visible guide before turn 1', async () => {
+    const { createGame, getGameState } = await getServices();
+    const game = await createGame({
+      hostName: host.name,
+      hostId: host.id,
+      initialPrompt: 'Jumpstart',
+      maxTurns: 2,
+      maxPlayers: 2,
+      mode: 'multi',
+    });
+
+    const state = await getGameState(game.id);
+    expect(state.game.initialPrompt).toBe('INIT-Jumpstart');
+    expect(state.game.guidePrompt).toBe('INIT-Jumpstart');
+    expect(state.game.turnsCount).toBe(0);
   });
 
   it('allows joining a multiplayer game and respects max players', async () => {
@@ -64,12 +84,12 @@ describe('gameService', () => {
     expect(full.error).toBe('Game is full');
   });
 
-  it('runs a single-player turn and auto-adds AI turn, finishing at maxTurns', async () => {
+  it('runs a single-player turn and finishes at the max turn limit', async () => {
     const { createGame, submitTurn, getGameState } = await getServices();
     const game = await createGame({
       hostName: host.name,
       hostId: host.id,
-      maxTurns: 2,
+      maxTurns: 1,
       mode: 'single',
     });
     const res = await submitTurn(game.id, {
@@ -77,12 +97,12 @@ describe('gameService', () => {
       playerId: host.id,
       text: 'The hero ventures forth.',
     });
-    expect(res.game.turnsCount).toBe(2); // human + AI
+    expect(res.game.turnsCount).toBe(1);
     expect(res.game.status).toBe('finished');
     expect(res.game.currentPlayer).toBeNull();
     expect(res.game.scores?.players?.Tester?.creativity).toBeDefined();
 
     const state = await getGameState(game.id);
-    expect(state.game.turnsCount).toBe(2);
+    expect(state.game.turnsCount).toBe(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -27,6 +27,13 @@ const StoryEditor = ({
       },
     },
   })
+
+  // Keep the editor content in sync when the parent resets (e.g., after submit).
+  useEffect(() => {
+    if (editor && content !== editor.getHTML()) {
+      editor.commands.setContent(content)
+    }
+  }, [content, editor])
 
   return (
     <div className={`
@@ -74,4 +81,3 @@ const StoryEditor = ({
 }
 
 export default StoryEditor
-

@@ -22,6 +22,9 @@ const SinglePlayer = () => {
   const { startMatch, updateMatch } = useMatch()
   const [story, setStory] = useState('')
   const [preview, setPreview] = useState('')
+  const [turnDurationSeconds, setTurnDurationSeconds] = useState(180) // default 3 minutes
+  const [hasStarted, setHasStarted] = useState(!!searchParams.get('gameId'))
+  const [localCountdown, setLocalCountdown] = useState(null)
   
   const gameId = searchParams.get('gameId')
   const createGameMutation = useCreateGame()
@@ -38,43 +41,68 @@ const SinglePlayer = () => {
 
   const game = gameData?.game
   const gameInfo = gameData?.info
-  const currentPrompt = game?.initialPrompt || game?.guidePrompt || 'You wake up in a world where gravity works sideways.'
+  const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'You wake up in a world where gravity works sideways.'
   const isMyTurn = game?.currentPlayerId === user.id
-  const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const timeRemaining = typeof gameInfo?.timeRemainingSeconds === 'number'
+    ? gameInfo.timeRemainingSeconds
+    : null
+  const displayTime = (localCountdown ?? timeRemaining ?? game?.turnDurationSeconds ?? turnDurationSeconds ?? 0)
+  const previousTurn = game?.lastTurn || gameInfo?.lastTurn
+  const showPreviousTurn = isMyTurn && previousTurn?.text
 
-  // Create game on mount if no gameId
   useEffect(() => {
-    if (!gameId && user.id && !createGameMutation.isPending) {
-      createGameMutation.mutate({
-        hostName: user.username || 'Player',
-        hostId: user.id,
-        initialPrompt: 'You wake up in a world where gravity works sideways.',
-        turnDurationSeconds: 300, // 5 minutes
-        maxTurns: 5,
-        maxPlayers: 2,
-        mode: 'single',
-      }, {
-        onSuccess: (data) => {
-          if (data?.game?.id) {
-            navigate(`/singleplayer?gameId=${data.game.id}`, { replace: true })
-            startMatch({
-              id: data.game.id,
-              mode: 'singleplayer',
-              players: data.game.players,
-              currentPrompt: data.game.initialPrompt,
-              story: '',
-              timeLimit: 5,
-              status: 'playing',
-            })
-          }
-        },
-        onError: (error) => {
-          console.error('Failed to create game:', error)
-          alert('Failed to create game. Please try again.')
-        },
-      })
+    if (game?.turnDurationSeconds) {
+      setTurnDurationSeconds(game.turnDurationSeconds)
     }
-  }, [gameId, user.id])
+  }, [game?.turnDurationSeconds])
+
+  // Smooth countdown between backend polls using the latest server time remaining
+  useEffect(() => {
+    if (typeof timeRemaining !== 'number') {
+      setLocalCountdown(null)
+      return
+    }
+    setLocalCountdown(timeRemaining)
+    const startedAt = Date.now()
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+      setLocalCountdown(Math.max(0, timeRemaining - elapsed))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [timeRemaining])
+
+  const beginGame = () => {
+    if (!user.id || createGameMutation.isPending) return
+    setHasStarted(true)
+    createGameMutation.mutate({
+      hostName: user.username || 'Player',
+      hostId: user.id,
+      initialPrompt: 'You wake up in a world where gravity works sideways.',
+      turnDurationSeconds,
+      maxTurns: 5,
+      maxPlayers: 2,
+      mode: 'single',
+    }, {
+      onSuccess: (data) => {
+        if (data?.game?.id) {
+          navigate(`/singleplayer?gameId=${data.game.id}`, { replace: true })
+          startMatch({
+            id: data.game.id,
+            mode: 'singleplayer',
+            players: data.game.players,
+            currentPrompt: data.game.initialPrompt,
+            story: '',
+            timeLimit: Math.round(turnDurationSeconds / 60),
+            status: 'playing',
+          })
+        }
+      },
+      onError: (error) => {
+        console.error('Failed to create game:', error)
+        alert('Failed to create game. Please try again.')
+      },
+    })
+  }
 
   // Update match context when game state changes
   useEffect(() => {
@@ -87,6 +115,12 @@ const SinglePlayer = () => {
       })
     }
   }, [game])
+
+  // Clear stale preview when the turn or player changes
+  useEffect(() => {
+    setPreview('')
+    previewTurnMutation.reset()
+  }, [game?.turnsCount, game?.currentPlayerId])
 
   const handlePreviewTurn = () => {
     if (!gameId || !story.trim() || !isMyTurn) return
@@ -107,6 +141,9 @@ const SinglePlayer = () => {
         console.error('Failed to preview turn:', error)
         alert(error.message || 'Failed to preview turn. Please try again.')
       },
+      onSettled: () => {
+        previewTurnMutation.reset()
+      },
     })
   }
 
@@ -123,6 +160,7 @@ const SinglePlayer = () => {
     }, {
       onSuccess: (data) => {
         setStory('')
+        setPreview('')
         if (data?.game?.status === 'finished') {
           navigate(`/story/${gameId}`)
         }
@@ -132,6 +170,50 @@ const SinglePlayer = () => {
         alert(error.message || 'Failed to submit turn. Please try again.')
       },
     })
+  }
+
+  if (!gameId) {
+    return (
+      <div className={`min-h-screen relative transition-colors ${themeClasses.bg}`}>
+        <div className="absolute top-4 right-4 z-20">
+          <ThemeToggle />
+        </div>
+        <AnimatedBackground variant="game" />
+        <Container className="relative z-10">
+          <div className="py-12 max-w-3xl mx-auto">
+            <Card className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className={`text-2xl font-header font-bold ${themeClasses.text}`}>1v1 vs AI</h2>
+                  <p className={`${themeClasses.textSecondary} text-sm`}>Choose your turn timer, then start the duel.</p>
+                </div>
+                <div className="text-3xl">⚔️</div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[60, 120, 180, 300].map((sec) => (
+                  <Button
+                    key={sec}
+                    variant={turnDurationSeconds === sec ? 'primary' : 'secondary'}
+                    onClick={() => setTurnDurationSeconds(sec)}
+                    className="w-full"
+                  >
+                    {Math.round(sec / 60)} minute{sec === 60 ? '' : 's'}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                variant="primary"
+                className="mt-6 w-full"
+                disabled={createGameMutation.isPending || !user.id}
+                onClick={beginGame}
+              >
+                {createGameMutation.isPending ? 'Starting...' : 'Start Match'}
+              </Button>
+            </Card>
+          </div>
+        </Container>
+      </div>
+    )
   }
 
   return (
@@ -190,6 +272,16 @@ const SinglePlayer = () => {
                 prompt={currentPrompt}
                 category="chaos"
               />
+              {showPreviousTurn && (
+                <Card className="mt-4 p-4">
+                  <div className="text-xs uppercase tracking-wide text-mint-pop font-semibold mb-2">
+                    Previous turn by {previousTurn.playerName}
+                  </div>
+                  <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                    {previousTurn.text}
+                  </div>
+                </Card>
+              )}
             </div>
 
             {/* Center: Story Editor */}
@@ -197,12 +289,12 @@ const SinglePlayer = () => {
               <Card className="p-6">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
-                    {isMyTurn ? 'Your Turn' : "StoryBot's Turn"}
+                    {isMyTurn ? 'Your Turn' : `${game?.currentPlayer || 'Player'}'s Turn`}
                   </h3>
-                  {timeRemaining > 0 && (
+                  {displayTime > 0 && (
                     <Timer
-                      initialTime={300}
-                      timeRemaining={timeRemaining}
+                      initialTime={game?.turnDurationSeconds || turnDurationSeconds || 300}
+                      timeRemaining={displayTime}
                       size={80}
                     />
                   )}
@@ -218,7 +310,7 @@ const SinglePlayer = () => {
                       content={story}
                       onChange={setStory}
                       isActive={isMyTurn}
-                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for StoryBot..."}
+                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for your turn..."}
                     />
 
                     <div className="mt-6 flex flex-wrap gap-4">
@@ -228,7 +320,7 @@ const SinglePlayer = () => {
                         onClick={handlePreviewTurn}
                         disabled={!isMyTurn || !story.trim() || previewTurnMutation.isPending}
                       >
-                        {previewTurnMutation.isPending ? 'Previewing...' : 'Preview AI Response'}
+                        {previewTurnMutation.isPending ? 'Previewing...' : 'Preview Next Prompt'}
                       </Button>
                       <Button
                         variant="primary"
@@ -249,7 +341,7 @@ const SinglePlayer = () => {
 
                     {(previewTurnMutation.isPending || preview) && (
                       <Card className="mt-4 bg-soft-charcoal/40">
-                        <div className="text-sm font-bold mb-2 text-mint-pop">AI Preview</div>
+                        <div className="text-sm font-bold mb-2 text-mint-pop">Next Prompt Preview</div>
                         {previewTurnMutation.isPending ? (
                           <div className="text-sm text-cloud-gray">Generating response...</div>
                         ) : (

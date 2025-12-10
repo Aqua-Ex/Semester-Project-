@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../firebase.js';
-import { generateGuidePrompt } from './aiService.js';
+import { generateGuidePrompt, generateInitialPrompt } from './aiService.js';
 import { scoreGame } from './scoringService.js';
 
 const gamesCollection = db.collection('games');
@@ -35,6 +35,16 @@ const clamp = (value, min, max, fallback) => {
 };
 
 const nowIso = () => new Date().toISOString();
+
+const scrubGameForPlayer = (game) => {
+  if (!game) return game;
+  const { storySoFar, ...rest } = game;
+  return {
+    ...rest,
+    // For display purposes, show the opener as the active prompt until the first guide exists.
+    guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+  };
+};
 
 const advanceTurnState = (game) => {
   if (!game.players || game.players.length === 0) {
@@ -80,9 +90,10 @@ const updateLeaderboard = async (playerScores, players, summary) => {
     if (!userId) continue;
 
     const creativity = Number(scoreObj.creativity) || 0;
-    const cohesion = Number(scoreObj.cohesion) || 0;
-    const momentum = Number(scoreObj.momentum) || 0;
-    const total = (creativity + cohesion + momentum) / 3;
+    const cohesion = Number(scoreObj.cohesion ?? scoreObj.continuity) || 0;
+    const promptFit = Number(scoreObj.prompt_fit ?? scoreObj.promptFit ?? scoreObj.momentum) || 0;
+    const momentum = Number(scoreObj.momentum ?? promptFit) || 0;
+    const total = (creativity + cohesion + promptFit) / 3;
 
     const ref = leaderboardCollection.doc(userId);
     await db.runTransaction(async (tx) => {
@@ -168,40 +179,46 @@ export const createGame = async ({
   if (!hostId) {
     throw new Error('hostId is required (Google user id)');
   }
-  const prompt = initialPrompt?.trim() || 'A traveler enters a mysterious forest...';
+  const seedPrompt = initialPrompt?.trim() || '';
+  const prompt = await generateInitialPrompt(seedPrompt);
 
   const isRapid = mode === MODES.RAPID;
+  const isSingle = mode === MODES.SINGLE;
   const duration = isRapid
     ? RAPID_CONFIG.initialDurationSeconds
-    : clamp(turnDurationSeconds, 30, 120, 60);
+    : clamp(turnDurationSeconds, 30, 600, 60);
   const turnsCap = clamp(maxTurns, 1, 50, isRapid ? 50 : 5);
-  const playerCap = clamp(maxPlayers, 2, 7, isRapid ? 2 : 3);
+  const minPlayers = mode === MODES.SINGLE || isRapid ? 1 : 2;
+  const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 1 : 3;
+  const playerCap = clamp(maxPlayers, minPlayers, 7, defaultCap);
 
   const gameId = randomUUID();
   const createdAt = nowIso();
 
   const players = [{ id: hostId, name: cleanHost }];
-  if (mode === MODES.SINGLE || isRapid) {
-    players.push({ id: 'ai-bot', name: 'StoryBot' });
-  }
 
-  const gameMode = isRapid ? MODES.RAPID : mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI;
+  const gameMode = isRapid ? MODES.RAPID : isSingle ? MODES.SINGLE : MODES.MULTI;
+  const initialStatus = isRapid || isSingle ? 'active' : 'waiting';
+  const initialDeadline =
+    initialStatus === 'active'
+      ? new Date(Date.now() + duration * 1000).toISOString()
+      : null;
 
   const game = {
     id: gameId,
     hostId,
     hostName: cleanHost,
-    status: isRapid ? 'active' : 'waiting',
+    status: initialStatus,
     initialPrompt: prompt,
-    guidePrompt: prompt,
+    guidePrompt: null,
+    storySoFar: prompt,
+    lastTurn: null,
     players,
     turnsCount: 0,
     turnDurationSeconds: duration,
     maxTurns: turnsCap,
     maxPlayers: playerCap,
-    turnDeadline: isRapid
-      ? new Date(Date.now() + duration * 1000).toISOString()
-      : null,
+    turnDeadline: initialDeadline,
     currentPlayerIndex: 0,
     currentPlayer: cleanHost,
     currentPlayerId: hostId,
@@ -294,11 +311,16 @@ export const previewTurn = async (gameId, { playerName = 'Anonymous', playerId, 
   }
 
   const cleanText = text.trim();
-  const lines = cleanText.split(/\n/).filter(Boolean);
-  const lastLine = lines[lines.length - 1] || cleanText;
-
   const order = (game.turnsCount || 0) + 1;
-  const guidePrompt = await generateGuidePrompt(lastLine, order);
+  const storySoFar = game.storySoFar || game.initialPrompt || '';
+  const combinedStory = [storySoFar, cleanText].filter(Boolean).join('\n');
+  const guidePrompt = await generateGuidePrompt({
+    storySoFar: combinedStory,
+    lastTurnText: cleanText,
+    previousPrompt: game.guidePrompt,
+    turnNumber: order + 1,
+    initialPrompt: game.initialPrompt,
+  });
 
   return {
     preview: guidePrompt,
@@ -384,11 +406,21 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
     }
 
     const cleanText = text.trim();
-    const lines = cleanText.split(/\n/).filter(Boolean);
-    const lastLine = lines[lines.length - 1] || cleanText;
-
     const order = (game.turnsCount || 0) + 1;
-    const guidePrompt = await generateGuidePrompt(lastLine, order);
+    const currentPrompt = game.guidePrompt || game.initialPrompt;
+    const storySoFar = game.storySoFar || game.initialPrompt || '';
+    const updatedStory = [storySoFar, cleanText].filter(Boolean).join('\n');
+
+    const willFinish = game.maxTurns ? order >= game.maxTurns : false;
+    const nextPrompt = willFinish
+      ? null
+      : await generateGuidePrompt({
+          storySoFar: updatedStory,
+          lastTurnText: cleanText,
+          previousPrompt: currentPrompt,
+          turnNumber: order + 1,
+          initialPrompt: game.initialPrompt,
+        });
 
     const turnId = randomUUID();
     const turn = {
@@ -397,11 +429,10 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       playerName: trimmedName,
       playerId,
       text: cleanText,
-      guidePrompt,
+      promptUsed: currentPrompt,
+      guidePrompt: currentPrompt,
       createdAt: nowIso(),
     };
-
-    const finishedHuman = game.maxTurns ? order >= game.maxTurns : false;
 
     const nextDuration =
       game.mode === MODES.RAPID
@@ -413,55 +444,29 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
 
     const baseUpdate = {
       ...game,
-      guidePrompt,
+      guidePrompt: nextPrompt,
+      storySoFar: updatedStory,
+      lastTurn: {
+        playerName: trimmedName,
+        playerId,
+        text: cleanText,
+        order,
+        promptUsed: currentPrompt,
+      },
       turnsCount: order,
       updatedAt: nowIso(),
-      status: finishedHuman ? 'finished' : 'active',
+      status: willFinish ? 'finished' : 'active',
       turnDurationSeconds: nextDuration,
-      turnDeadline: finishedHuman
+      turnDeadline: willFinish
         ? null
         : new Date(Date.now() + nextDuration * 1000).toISOString(),
     };
 
-    let progressed = finishedHuman ? { ...baseUpdate, currentPlayerId: null, currentPlayer: null } : advanceTurnState(baseUpdate);
+    let progressed = willFinish ? { ...baseUpdate, currentPlayerId: null, currentPlayer: null } : advanceTurnState(baseUpdate);
 
     tx.set(gameRef, progressed);
     tx.set(gameRef.collection('turns').doc(turnId), turn);
-
-    // Single-player: auto AI turn
-    const isSinglePlayerMode = game.mode === MODES.SINGLE || game.mode === MODES.RAPID;
-    if (!finishedHuman && isSinglePlayerMode) {
-      const aiOrder = progressed.turnsCount + 1;
-      const aiLastLine = cleanText;
-      const aiGuide = await generateGuidePrompt(aiLastLine, aiOrder);
-      const aiTurnId = randomUUID();
-      const aiTurn = {
-        id: aiTurnId,
-        order: aiOrder,
-        playerName: 'StoryBot',
-        playerId: 'ai-bot',
-        text: aiGuide,
-        guidePrompt: aiGuide,
-        createdAt: nowIso(),
-      };
-      progressed.turnsCount = aiOrder;
-      progressed.guidePrompt = aiGuide;
-      const finishedAfterAi = game.maxTurns ? aiOrder >= game.maxTurns : false;
-      progressed.status = finishedAfterAi ? 'finished' : 'active';
-      progressed.currentPlayer = finishedAfterAi ? null : game.players[0]?.name;
-      progressed.currentPlayerId = finishedAfterAi ? null : game.players[0]?.id;
-      progressed.turnDeadline = finishedAfterAi
-        ? null
-        : new Date(Date.now() + (progressed.turnDurationSeconds || game.turnDurationSeconds) * 1000).toISOString();
-      progressed.updatedAt = nowIso();
-
-      tx.set(gameRef, progressed);
-      tx.set(gameRef.collection('turns').doc(aiTurnId), aiTurn);
-
-      return { game: progressed, turn, finished: finishedAfterAi };
-    }
-
-    return { game: progressed, turn, finished: finishedHuman };
+    return { game: progressed, turn, finished: willFinish };
   });
 
   if (result?.error) {
@@ -484,7 +489,8 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
         order: d.data().order,
         playerName: d.data().playerName,
         text: d.data().text,
-        guidePrompt: d.data().guidePrompt,
+        guidePrompt: d.data().promptUsed || d.data().guidePrompt,
+        promptUsed: d.data().promptUsed || d.data().guidePrompt,
       }));
       const summary = {
         gameId,
@@ -542,8 +548,10 @@ export const getGameState = async (gameId) => {
     : null;
   const isFull = game.players.length >= game.maxPlayers;
 
+  const visibleGame = scrubGameForPlayer(game);
+
   return {
-    game,
+    game: visibleGame,
     info: {
       status: game.status,
       currentPlayer: game.currentPlayer,
@@ -555,6 +563,7 @@ export const getGameState = async (gameId) => {
       maxPlayers: game.maxPlayers,
       isFull,
       scores: game.scores || null,
+      lastTurn: game.lastTurn || null,
     },
   };
 };

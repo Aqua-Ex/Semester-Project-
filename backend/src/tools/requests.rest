@@ -6,7 +6,7 @@ Content-Type: application/json
 {
   "hostName": "Tester",
   "hostId": "tester-user-1",
-  "initialPrompt": "A traveler enters a mysterious forest...",
+  "initialPrompt": "",
   "turnDurationSeconds": 60,
   "maxTurns": 3,
   "maxPlayers": 3,
@@ -14,7 +14,7 @@ Content-Type: application/json
 }
 
 ### Join an existing game (1)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
+POST http://localhost:3001/api/game/a02c62c8-081a-418e-b2b7-43b83c9183bd/join
 Content-Type: application/json
 
 {
@@ -32,13 +32,13 @@ Content-Type: application/json
 }
 
 ### Submit a turn (uses ID from createGame)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/turn
+POST http://localhost:3001/api/game/d4875d3d-6ccf-4245-ad18-a7a33dc17675/turn
 Content-Type: application/json
 
 {
-  "playerName": "Tester",
-  "playerId": "tester-user-1",
-  "text": "The hero entered the forest, unaware of the danger ahead."
+  "playerName": "Player2",
+  "playerId": "player2-user-1",
+  "text": "The ballet dancers demanded that the crew leave the ship"
 }
 
 ### Submit turn 2 (Player2)
@@ -59,6 +59,16 @@ Content-Type: application/json
   "playerName": "Player3",
   "playerId": "player3-user-1",
   "text": "A silver light flickered ahead, promising safety or a trap."
+}
+
+### Preview a turn (uses ID from createGame)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/preview
+Content-Type: application/json
+
+{
+  "playerName": "Player2",
+  "playerId": "player2-user-1",
+  "text": "A quick sample turn text to get a preview prompt."
 }
 
 ### Get game state (uses ID from createGame)

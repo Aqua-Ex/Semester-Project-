@@ -36,6 +36,8 @@ const RapidFire = () => {
   const isMyTurn = game?.currentPlayerId === user?.id
   const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'A robot learns to feel emotions for the first time.'
   const currentTurnSeconds = game?.turnDurationSeconds || 60
+  const previousTurn = game?.lastTurn || gameInfo?.lastTurn
+  const showPreviousTurn = isMyTurn && previousTurn?.text
 
   // Create rapid game on mount
   useEffect(() => {
@@ -184,6 +186,16 @@ const RapidFire = () => {
                 prompt={currentPrompt}
                 category="chaos"
               />
+              {showPreviousTurn && (
+                <Card className="mt-4 p-4">
+                  <div className="text-xs uppercase tracking-wide text-mint-pop font-semibold mb-2">
+                    Previous turn by {previousTurn.playerName}
+                  </div>
+                  <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                    {previousTurn.text}
+                  </div>
+                </Card>
+              )}
               <motion.div
                 className="mt-4 text-center"
                 animate={{ scale: [1, 1.1, 1] }}
@@ -219,7 +231,7 @@ const RapidFire = () => {
                     content={story}
                     onChange={setStory}
                     isActive={isMyTurn}
-                    placeholder={isMyTurn ? "Write fast! Time is running out..." : "Waiting for StoryBot..."}
+                    placeholder={isMyTurn ? "Write fast! Time is running out..." : "Waiting for your turn..."}
                   />
 
                   <div className="mt-6 flex gap-4">

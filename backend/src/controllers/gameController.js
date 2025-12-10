@@ -8,12 +8,21 @@ import {
 } from '../services/gameService.js';
 import {log} from '../tools/logger.js';
 
+const scrubGame = (game) => {
+    if (!game) return game;
+    const {storySoFar, ...rest} = game;
+    return {
+        ...rest,
+        guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+    };
+};
+
 export const createGame = async (req, res) => {
     const {hostName, hostId, initialPrompt, turnDurationSeconds, maxTurns, maxPlayers, mode} = req.body || {};
     const game = await createGameService({hostName, hostId, initialPrompt, turnDurationSeconds, maxTurns, maxPlayers, mode});
 
     log('Created game', game.id);
-    res.status(201).json({game});
+    res.status(201).json({game: scrubGame(game)});
 };
 
 export const submitTurn = async (req, res) => {
@@ -27,7 +36,7 @@ export const submitTurn = async (req, res) => {
     }
 
     log(`Turn ${result.turn.order} submitted to game ${gameId} by ${result.turn.playerName}`);
-    res.json({game: result.game, turn: result.turn, scores: result.scores});
+    res.json({game: scrubGame(result.game), turn: result.turn, scores: result.scores});
 };
 
 export const previewTurn = async (req, res) => {
@@ -52,7 +61,7 @@ export const getGameState = async (req, res) => {
         return res.status(result.status || 404).json({error: result.error});
     }
 
-    res.json({game: result.game, info: result.info});
+    res.json({game: scrubGame(result.game), info: result.info});
 };
 
 export const joinGame = async (req, res) => {
@@ -66,7 +75,7 @@ export const joinGame = async (req, res) => {
     }
 
     log(`Player ${playerName} joined game ${gameId}`);
-    res.json({game: result.game});
+    res.json({game: scrubGame(result.game)});
 };
 
 export const startGame = async (req, res) => {
@@ -80,5 +89,5 @@ export const startGame = async (req, res) => {
     }
 
     log(`Game ${gameId} started by ${playerId || 'unknown'}`);
-    res.json({game: result.game});
+    res.json({game: scrubGame(result.game)});
 };
