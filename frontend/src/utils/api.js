@@ -3,7 +3,8 @@
  * Handles all communication with the backend API
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Default to same-origin (Firebase Hosting rewrite to Functions) and fall back to local dev server
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '');
 
 /**
  * Base fetch wrapper with error handling
